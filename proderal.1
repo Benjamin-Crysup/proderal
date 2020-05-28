@@ -1,0 +1,69 @@
+.TH PRODERAL 1
+.SH NAME
+proderal \- realign sequences in problematic regions
+.SH SYNOPSIS
+.B proderal
+\fB\-\-ref \fIreffa\fR
+[\fB\-\-prob \fIprobfile\fR]
+[\fB\-\-promiscuous\fR]
+\fB\-\-cost \fIcostfile\fR
+[\fB\-\-overrun \fInum\fR]
+[\fB\-\-atlocal\fR]
+[\fB\-\-atsemi\fR]
+[\fB\-\-atglobal\fR]
+[\fB\-\-rank \fInum\fR]
+[\fB\-\-count \fInum\fR]
+[\fB\-\-reclaimsoft \fInum\fR]
+[\fB\-\-qualm \fIqualfile\fR]
+[\fB\-\-hfuzz \fImaxrep\fR]
+[\fIfile\fR]
+.SH DESCRIPTION
+.B proderal
+PROhibiting DERangement in ALignments takes a SAM file (either in a file or through stdin).
+All header information is passed as-is, and any uninteresting entries in the file are also passed through.
+The interesting entries are those which have any overlap with a known problem region (regions specified in a bed file).
+For all such interesting entries, the bases they originally mapped to (along with the bases of the problem region(s)) are extracted from the reference, and a new alignment is performed using a position dependent cost function.
+Any supplemental alignments will be discarded.
+.SH OPTIONS
+.TP
+.BR \-\-ref \ \fIref.fa\fR
+Specify the reference to use, in a fasta file.
+.TP
+.BR \-\-prob \ \fIprobfile.bed\fR
+Specify the regions known to be problematic in a bed file. At least one of prob or promiscuous must be specified.
+.TP
+.BR \-\-promiscuous\fR
+Specify that all alignments should be realigned (in their original neighborhood). Usefull with the overrun option. At least one of prob or promiscuous must be specified.
+.TP
+.BR \-\-cost \ \fIcostfile\fR
+Specify the position dependent cost file to use.
+.TP
+.BR \-\-overrun \ \fInum\fR
+After getting the aligned bases from the reference, along with the remainder of the overlapped problem region, some additional neighboring bases from the reference can be taken as well. This changes the number of neighboring bases that are taken. Defaults to 20.
+.TP
+.BR \-\-atlocal\fR
+Sets this to use local alignment (potentially no ends consumed in the alignment).
+.TP
+.BR \-\-atsemi\fR
+Sets this to use semiglobal alignment (two opposing ends must be consumed). This is the default.
+.TP
+.BR \-\-atglobal\fR
+Sets this to use global alignment (all ends must be consumed). Not recommended except for VERY limited references.
+.TP
+.BR \-\-rank \ \fInum\fR
+The rank of alignment to get. Defaults to 0 (get the best alignment(s)).
+.TP
+.BR \-\-count \ \fInum\fR
+The maximum number of alignments to get. Set to zero to get all alignments up to (and including) the specified rank. Defaults to 1. Better alignments will come first.
+.TP
+.BR \-\-reclaimsoft \ \fInum\fR
+If set, will try to realign any soft clipped bases in the starting interesting entries. The number is the number of extra overrun bases to claim per soft clipped base.
+.TP
+.BR \-\-qualm \ \fIqualfile\fR
+If provided, alignment parameters will be modified according to the base quality of the reads according to the given file.
+.TP
+.BR \-\-hfuzz \ \fImaxrep\fR
+If provided, the initial search for top alignment scores will stop if any given score is encountered maxrep times. Set to a moderately large positive value if you expect highly degenerate alignments.
+.TP
+.BR \fIfile\fR
+The sam file to work over. If omitted, the sam is expected to come in over stdin.
