@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "whodun_sort.h"
+
 /**The number of bytes used to store entries in the suffix array.*/
 #define SUFFIX_ARRAY_CANON_SIZE 8
 
@@ -66,5 +68,47 @@ uintptr_t multiSuffixArrayLowerBound(const char* toFind, uintptr_t numStrings, c
  * @return The index of the entry after the relavent entry in sort store, or numInSort if not found.
  */
 uintptr_t multiSuffixArrayUpperBound(const char* toFind, uintptr_t numStrings, const char** onData, uintptr_t* strIStore, uintptr_t* sortStore, uintptr_t numInSort);
+
+/**Handles sorting by rank and next-rank.*/
+class SingleStringSuffixRankSortOption : public SortOptions{
+public:
+	/**Basic setup.*/
+	SingleStringSuffixRankSortOption();
+};
+
+/**Handles sorting on index: useless in-memory, vital outside.*/
+class SingleStringSuffixIndexSortOption : public SortOptions{
+public:
+	/**Basic setup.*/
+	SingleStringSuffixIndexSortOption();
+};
+
+/**Sorts rank/location pairs by location.*/
+class SingleStringSuffixRLPairSortOption : public SortOptions{
+public:
+	/**Basic setup.*/
+	SingleStringSuffixRLPairSortOption();
+};
+
+/**Handles sorting by rank and next-rank.*/
+class MultiStringSuffixRankSortOption : public SortOptions{
+public:
+	/**Basic setup.*/
+	MultiStringSuffixRankSortOption();
+};
+
+/**Handles sorting on index: useless in-memory, vital outside.*/
+class MultiStringSuffixIndexSortOption : public SortOptions{
+public:
+	/**Basic setup.*/
+	MultiStringSuffixIndexSortOption();
+};
+
+/**Sorts rank/location pairs by location.*/
+class MultiStringSuffixRLPairSortOption : public SortOptions{
+public:
+	/**Basic setup.*/
+	MultiStringSuffixRLPairSortOption();
+};
 
 #endif

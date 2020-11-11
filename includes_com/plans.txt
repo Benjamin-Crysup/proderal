@@ -1,0 +1,2 @@
+argument parsing
+read fasta/fastq

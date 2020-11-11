@@ -1,6 +1,8 @@
 #include "whodun_probutil.h"
 
 #include <math.h>
+#include <float.h>
+#include <stdint.h>
 
 ProbabilitySummation::ProbabilitySummation(){
 	runningSum = 0.0;
@@ -49,3 +51,28 @@ double ProbabilitySummation::getFinalLogSum(){
 	}
 	return maxLogProb + log10(runningSum);
 }
+
+#define EULERMASCHERONI 0.5772156649015328606065120900824024310421
+
+double logGamma(double forVal){
+	if(forVal <= 0.0){
+		return 0.0 / 0.0;
+	}
+	double fullTot = - EULERMASCHERONI * forVal;
+	fullTot -= log(forVal);
+	uintptr_t curK = 1;
+	while(true){
+		double curAdd = forVal/curK - log(1.0 + forVal/curK);
+		if(fabs(fullTot) > DBL_EPSILON){
+			if(fabs(curAdd/fullTot) < DBL_EPSILON){
+				break;
+			}
+		}
+		else if(fabs(curAdd) < DBL_EPSILON){
+			break;
+		}
+		fullTot += curAdd;
+	}
+	return fullTot;
+}
+

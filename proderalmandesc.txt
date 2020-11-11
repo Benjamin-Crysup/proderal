@@ -1,0 +1,5 @@
+PROhibiting DERangement in ALignments takes a SAM file (either in a file or through stdin).
+All header information is passed as-is, and any uninteresting entries in the file are also passed through.
+The interesting entries are those which have any overlap with a known problem region (regions specified in a bed file).
+For all such interesting entries, the bases they originally mapped to (along with the bases of the problem region(s)) are extracted from the reference, and a new alignment is performed using a position dependent cost function.
+Any supplemental/secondary alignments will be discarded.

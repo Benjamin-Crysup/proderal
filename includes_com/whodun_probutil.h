@@ -30,4 +30,11 @@ public:
 	double queuedVals[SUMMATION_QUEUE];
 };
 
+/**
+ * Calculate the log gamma function.
+ * @param forVal The value to calculate for.
+ * @return The ln-gamma.
+ */
+double logGamma(double forVal);
+
 #endif

@@ -44,6 +44,39 @@ int fseekPointer(FILE* stream, intptr_t offset, int whence);
 intptr_t ftellPointer(FILE* stream);
 
 /**
+ * Get whether a directory exists.
+ * @param dirName The name of the directory.
+ * @return Whether it exists.
+ */
+bool directoryExists(const char* dirName);
+
+/**
+ * Make a directory.
+ * @param dirName The name of the directory.
+ * @return Whether there was a problem.
+ */
+int makeDirectory(const char* dirName);
+
+/**
+ * Delete a directory, if it exists.
+ * @param dirName The name of the directory to delete.
+ */
+void killDirectory(const char* dirName);
+
+/**
+ * get the contents of a directory.
+ * @param dirName The name of the directory.
+ * @return The number of entries, followed by char**. The char* start with a byte specifying whether each item is a folder: the rest is the null terminated name.
+ */
+uintptr_t* openDirectory(const char* dirName);
+
+/**
+ * Close an opened directory.
+ * @param theDir THe previously opened directory.
+ */
+void closeDirectory(uintptr_t* theDir);
+
+/**
  * This will start a thread.
  * @param callFun The thread function.
  * @param callUniform The thing to pass to said function.

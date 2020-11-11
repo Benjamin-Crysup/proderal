@@ -2,328 +2,432 @@
 #define WHODUN_ALIGN_AFFINEPD_H 1
 
 #include <map>
-#include <string>
 
-/* **********************************************
- Specification of individual costs
- */
+#include "whodun_align_affine.h"
 
-/**Affine gap cost information.*/
-typedef struct{
-	/**The map from character values to indices.*/
-	int* charMap;
-	/**The number of character entries in the cost table.*/
-	int numLiveChars;
-	/**The costs of each interaction pair.*/
-	int** allMMCost;
-	/**The cost to open a gap.*/
-	int openCost;
-	/**The cost to extend a gap.*/
-	int extendCost;
-	/**The cost to close a gap.*/
-	int closeCost;
-} AlignCostAffine;
+/**Map from quality ranges to mangles.*/
+class PositionalQualityMangleSet{
+public:
+	/**
+	 * Get the mangle for a quality.
+	 * @param relMang The quality (ascii phred score).
+	 * @return The relevant mangle.
+	 */
+	AlignCostAffineMangleSet* getMangleForQuality(unsigned char relMang);
+	/**
+	 * Parse a set of quality specific mangles.
+	 * @param parseS The first character to parse.
+	 * @param parseE The last character to parse.
+	 */
+	void parseQualityMangleSet(const char* parseS, const char* parseE);
+	/**The (inclusive) quality rangles.*/
+	std::vector<unsigned char> allQualLow;
+	/**The (inclusive) quality rangles.*/
+	std::vector<unsigned char> allQualHigh;
+	/**The relevant mangles*/
+	std::vector<AlignCostAffineMangleSet> relMangs;
+};
+
+/**Quality mangles specific to a region in the reference.*/
+class PositionDependentQualityMangleSet{
+public:
+	/**
+	 * Parse a set of position specific mangles.
+	 * @param parseS The first character to parse.
+	 * @param parseE The last character to parse.
+	 */
+	void parsePositionMangleSet(const char* parseS, const char* parseE);
+	
+	/**
+	 * Take another mangle set and limit it to a given range.
+	 * @param toRebase The set to rebase.
+	 * @param newLow The new low reference index.
+	 * @param newHig The new high reference index.
+	 */
+	void rebase(PositionDependentQualityMangleSet* toRebase, uintptr_t newLow, uintptr_t newHig);
+	
+	/**The default mangle.*/
+	PositionalQualityMangleSet defMangle;
+	/**The low parts of each range, exclusive.*/
+	std::vector<uintptr_t> rangLow;
+	/**The high parts of each range, inclusive.*/
+	std::vector<uintptr_t> rangHig;
+	/**The mangles for each range.*/
+	std::vector<PositionalQualityMangleSet> rangMang;
+};
 
 /**
- * This will parse an affine gap cost.
- * @param numPChars The number of characters in toParse (not including the null).
- * @param toParse The thing to parse.
- * @param toFill The place to put the filled in cost.
- * @return The character location after the last byte parsed (null on error).
+ * Parse a multiregion position dependent quality mangle specification.
+ * @param parseS The start of the string to parse.
+ * @param parseE The end of the string to parse.
+ * @param toFill The place to put the parsed entries.
  */
-const char* parseAffineGapCostSpecification(int numPChars, const char* toParse, AlignCostAffine** toFill);
+void parseMultiregionPositionQualityMangle(const char* parseS, const char* parseE, std::map<std::string, PositionDependentQualityMangleSet>* toFill);
 
-/**
- * This will clone an affine gap alignment cost.
- * @param toClone The thing to clone.
- * @return The cloned value.
- */
-AlignCostAffine* cloneAlignCostAffine(AlignCostAffine* toClone);
+/**Map from quality ranges to mangles.*/
+class PositionalBiQualityMangleSet{
+public:
+	/**
+	 * Get the mangle for a quality.
+	 * @param relMangA The quality (ascii phred score).
+	 * @param relMangB The quality (ascii phred score).
+	 * @return The relevant mangle.
+	 */
+	AlignCostAffineMangleSet* getMangleForQualities(unsigned char relMangA, unsigned char relMangB);
+	/**
+	 * Parse a set of quality specific mangles.
+	 * @param parseS The first character to parse.
+	 * @param parseE The last character to parse.
+	 */
+	void parseQualityMangleSet(const char* parseS, const char* parseE);
+	/**The (inclusive) quality rangles.*/
+	std::vector< std::pair<int,int> > allQualLow;
+	/**The (inclusive) quality rangles.*/
+	std::vector< std::pair<int,int> > allQualHigh;
+	/**The relevant mangles*/
+	std::vector<AlignCostAffineMangleSet> relMangs;
+};
 
-/**
- * Will free an affine gap align cost.
- * @param toKill The thing to kill.
- */
-void freeAlignCostAffine(AlignCostAffine* toKill);
-
-/* **********************************************
- Specification of position dependent costs
- */
- 
-/**A description of a region.*/
-typedef struct{
+/**A description of costs in a genomic pair region.*/
+class PositionDependentCostRegion{
+public:
 	/**The starting position in A of this region.*/
-	int startA;
+	intptr_t startA;
 	/**The ending position in A of this region.*/
-	int endA;
+	intptr_t endA;
 	/**The starting position in B of this region.*/
-	int startB;
+	intptr_t startB;
 	/**The ending position in B of this region.*/
-	int endB;
+	intptr_t endB;
 	/**The priority of this region.*/
 	int priority;
 	/**The costs of this region.*/
-	AlignCostAffine* regCosts;
-} PositionDependentBounds;
- 
- #define PDAG_AXIS_A 1
- #define PDAG_AXIS_B 2
- 
-/**A node in the region tree for a position dependent alignment.*/
-typedef struct{
-	/**The axis being split on.*/
+	AlignCostAffine regCosts;
+};
+
+#define POSITIONDEPENDENT_SPLITAXIS_A 1
+#define POSITIONDEPENDENT_SPLITAXIS_B 2
+
+/**A node in the KD tree.*/
+class PositionDependentCostKDNode{
+public:
+	/**Set up an empty.*/
+	PositionDependentCostKDNode();
+	/**Tear down.*/
+	~PositionDependentCostKDNode();
+	/**The axis to split on.*/
 	int splitOn;
-	/**The location split at.*/
-	int splitAt;
-	/**The node for everything strictly less than.*/
-	void* subNodeLesser;
-	/**The node for everything greater than or equal.*/
-	void* subNodeGreatE;
-	/**The number that span.*/
-	int numSpan;
-	/**The bounds that span.*/
-	PositionDependentBounds** allSpans;
-} PositionDependentAlignCostKDNode;
- 
- /**
-  * This will find the relevant cost for a position.
-  * @param forPDCost THe position dependent cost.
-  * @param inA THe index in A.
-  * @param inB The index in B.
-  * @return The relevant costs of (inA,inB).
-  */
-AlignCostAffine* getPositionDependentAlignmentCosts(PositionDependentAlignCostKDNode* forPDCost, int inA, int inB);
+	/**The location to split at.*/
+	intptr_t splitAt;
+	/**The node for everything less than, if any.*/
+	PositionDependentCostKDNode* subNodeLesser;
+	/**The node index for everything greater than or equal (-1 for no such node).*/
+	PositionDependentCostKDNode* subNodeGreatE;
+	/**The regions that straddle this split.*/
+	std::vector<PositionDependentCostRegion*> allSpans;
+};
+
+/**A kdtree for position dependent alignment costs.*/
+class PositionDependentCostKDTree{
+public:
+	/**Storage for the raw regions.*/
+	std::vector<PositionDependentCostRegion> allRegions;
+	/**The nodes of this tree.*/
+	PositionDependentCostKDNode* allNodes;
+	/**Storage for the tree.*/
+	std::vector<PositionDependentCostKDNode> builtTree;
+	/**The number of nodes in the built tree that are in use.*/
+	uintptr_t builtInUse;
+	/**
+	 * Copy another tree.
+	 * @param toCopy The tree to copy.
+	 */
+	PositionDependentCostKDTree(const PositionDependentCostKDTree& toCopy);
+	/**
+	 * Copy another tree.
+	 * @param toClone The thing to copy.
+	 */
+	PositionDependentCostKDTree& operator=(const PositionDependentCostKDTree& toClone);
+	/**Set up an empty tree.*/
+	PositionDependentCostKDTree();
+	/**Tear down.*/
+	~PositionDependentCostKDTree();
+	
+	/**
+	 * Take the things in allRegions and build the tree.
+	 */
+	void produceFromRegions();
+	/**Call if you manually update allRegions.*/
+	void regionsUpdated();
+	/**
+	 * Produce regions for a uniform cost tree.
+	 * @param baseCost The cost to apply.
+	 */
+	void regionsUniform(AlignCostAffine* baseCost);
+	/**
+	 * Fill in regions by rebasing another tree.
+	 * @param toRebase The tree to rebase.
+	 * @param newLowA The point in the first sequence to consider the new zero. Negative to disable filtering on a.
+	 * @param newHigA The point in the first sequence to cut off at.
+	 * @param newLowB The point in the second sequence to consider the new zero. Negative to disable filtering on b.
+	 * @param newHigB The point in the second sequence to cut off at.
+	 */
+	void regionsRebased(PositionDependentCostKDTree* toRebase, intptr_t newLowA, intptr_t newHighA, intptr_t newLowB, intptr_t newHighB);
+	/**
+	 * Mangle region parameters based on read quality.
+	 * @param toMangle The tree to mangle.
+	 * @param useMangle The mangle set to use.
+	 * @param readQuals The ascii phred scores of the bases in the read.
+	 */
+	void regionsQualityMangled(PositionDependentCostKDTree* toMangle, PositionDependentQualityMangleSet* useMangle, std::vector<char>* readQuals);
+	/**
+	 * Mangle region parameters based on multiple read qualities.
+	 * @param toMangle The tree to mangle.
+	 * @param useMangle The mangle set to use.
+	 * @param readQualsA The ascii phred scores of the bases in the first sequence ("reference").
+	 * @param readQualsB The ascii phred scores of the bases in the second sequence ("read").
+	 */
+	void regionsBiQualityMangled(PositionDependentCostKDTree* toMangle, PositionalBiQualityMangleSet* useMangle, std::vector<char>* readQualsA, std::vector<char>* readQualsB);
+	/**
+	 * Parse regions from text.
+	 * @param parseS The first character to try to parse.
+	 * @param parseE The character after the last possible character.
+	 * @return The character after the last byte this used.
+	 */
+	const char* regionsParse(const char* parseS, const char* parseE);
+	
+	/**
+	 * Get the costs at the given location.
+	 * @param inA The location in the reference.
+	 * @param inB The location in the read.
+	 */
+	AlignCostAffine* getCostsAt(intptr_t inA, intptr_t inB);
+	/**
+	 * Get the costs along a line.
+	 * @param inA The index in A.
+	 * @param fromB The index in B to start at.
+	 * @param toB The index in B to go to.
+	 * @param saveRes The place to save the results (one entry for each point in b).
+	 */
+	void getCostsForA(intptr_t inA, intptr_t fromB, intptr_t toB, std::vector<AlignCostAffine*>* saveRes);
+	/**
+	 * Get the costs along a line.
+	 * @param fromA The index in A to start at.
+	 * @param toA The index in A to go to.
+	 * @param inB The index in B.
+	 * @param saveRes The place to save the results (one entry for each point in a).
+	 */
+	void getCostsForB(intptr_t fromA, intptr_t toA, intptr_t inB, std::vector<AlignCostAffine*>* saveRes);
+private:
+	/**
+	 * Build the tree from the regions.
+	 */
+	void buildPDTreeSplits(uintptr_t numRegs, PositionDependentCostRegion** theRegs);
+	/**Save pointers to the regions.*/
+	std::vector<PositionDependentCostRegion*> saveRegPtrs;
+};
+
+/**Output for debug.*/
+std::ostream& operator<<(std::ostream& os, const PositionDependentCostKDTree& toOut);
 
 /**
- * This will make a universally applicable position dependent cost.
- * @param useEvery The cost to use everywhere.
- * @return A position dependent cost with a single spec.
+ * Parse a multiregion position dependent cost specification.
+ * @param parseS The start of the string to parse.
+ * @param parseE The end of the string to parse.
+ * @param toFill The place to put the parsed entries.
  */
-PositionDependentAlignCostKDNode* produceUniversalPositionDependent(AlignCostAffine* useEvery);
+void parseMultiregionPositionDependentCost(const char* parseS, const char* parseE, std::map<std::string,PositionDependentCostKDTree>* toFill);
 
-/**
- * This will parse a cost file.
- * @param numChars THe number of bytes in the file.
- * @param toParse The bytes from the file.
- * @return The cost data.
- */
-PositionDependentAlignCostKDNode* parseAsciiPositionDependentSpecification(int numChars, const char* toParse);
+class PositionDependentAffineGapLinearPairwiseAlignment;
 
-/**
- * This will take a position dependent cost specification and limit it to those thinge relevant to a region.
- * @param startPoint The original cost.
- * @param newLowA The point in the first sequence to consider the new zero. Negative to disable filtering on a.
- * @param newHigA The point in the first sequence to cut off at.
- * @param newLowB The point in the second sequence to consider the new zero. Negative to disable filtering on b.
- * @param newHigB The point in the second sequence to cut off at.
- * @return The rebased item.
- */
-PositionDependentAlignCostKDNode* rebasePositionDependentSpecification(PositionDependentAlignCostKDNode* startPoint, int newLowA, int newHigA, int newLowB, int newHigB);
-
-/**
- * This will parse a multi-region cost file.
- * @param numChars THe number of bytes in the file.
- * @param toParse The bytes from the file.
- * @param toFill The place to put the read stuff. All added PositionDependentAlignCostAffine will need to be freed.
- * @return Whether there was a problem.
- */
-int parseAsciiMultiregionPositionDependentSpecification(int numChars, const char* toParse, std::map<std::string,PositionDependentAlignCostKDNode*>* toFill);
-
-/**
- * Frees cost information read by a parse method.
- * @param toKill The thing to kill.
- */
-void freePositionDependentCostInformation(PositionDependentAlignCostKDNode* toKill);
-
-/* **********************************************
- Read quality
- */
-
-/**Change score based on quality.*/
+/**A focus point in an iteration.*/
 typedef struct{
-	/**The number of transliteration alterations.*/
-	int numEntries;
-	/**The reference characters.*/
-	char* fromChars;
-	/**The read characters.*/
-	char* toChars;
-	/**What to do to transliteration costs.*/
-	char** charMangTodo;
-	/**What to do to gap open cost.*/
-	char* gapOpenTodo;
-	/**What to do to gap close cost.*/
-	char* gapCloseTodo;
-	/**What to do to gap extends.*/
-	char* gapExtendTodo;
-} PositionDependentQualityChanges;
+	/**The i index.*/
+	intptr_t focI;
+	/**The j index.*/
+	intptr_t focJ;
+	/**The directions left to consider.*/
+	intptr_t liveDirs;
+	/**The score for this path.*/
+	intptr_t pathScore;
+	/**How this location was approached.*/
+	intptr_t howGot;
+	/**Whether the default path for this entry has been hit.*/
+	intptr_t seenDef;
+} PositionDependentAGLPFocusStackEntry;
 
-/**All changes for quality in a given reference.*/
-typedef struct{
-	/**The number of qualities in question.*/
-	int numQuals;
-	/**The low qualities in question.*/
-	unsigned char* allQualLow;
-	/**The high qualities in question.*/
-	unsigned char* allQualHigh;
-	/**All relevante changes.*/
-	PositionDependentQualityChanges** allQChange;
-} PositionDependentQualityChangeSet;
+class PositionDependentAffineGapLinearPairwiseAlignmentIteration : public LinearPairwiseAlignmentIteration{
+public:
+	/**
+	 * Set up an optimal iteration through the given alignment.
+	 * @param forAln The base alignment.
+	 */
+	PositionDependentAffineGapLinearPairwiseAlignmentIteration(PositionDependentAffineGapLinearPairwiseAlignment* forAln);
+	/**Clean up.*/
+	~PositionDependentAffineGapLinearPairwiseAlignmentIteration();
+	
+	/**
+	 * Change the problem this is working on.
+	 * @param forAln The base alignment.
+	 */
+	void changeProblem(PositionDependentAffineGapLinearPairwiseAlignment* forAln);
+	/**
+	 * Change the problem this is working on.
+	 * @param forAln The base alignment.
+	 * @param minimumScore The minimum score to entertain.
+	 * @param maximumDupDeg The maximum number of times to entertain a duplicate score: zero for infinite.
+	 * @param maximumNumScore The maximum number of scores to keep track of.
+	 */
+	void changeProblem(PositionDependentAffineGapLinearPairwiseAlignment* forAln, intptr_t minimumScore, intptr_t maximumDupDeg, intptr_t maximumNumScore);
+	
+	int getNextAlignment();
+	
+	void updateMinimumScore(intptr_t newMin);
+	
+private:
+	/**The minimum score to entertain.*/
+	intptr_t minScore;
+	/**The maximum number of times to entertain a duplicate score: zero for infinite.*/
+	intptr_t maxDupDeg;
+	/**The maximum number of scores to keep track of.*/
+	intptr_t maxNumScore;
+	/**The scores.*/
+	std::vector<intptr_t> allScore;
+	/**The number of times each has been seen.*/
+	std::vector<intptr_t> allScoreSeen;
+	
+	/**
+	 * Returns whether there are any more paths.
+	 * @return Whether there is still a path being looked at.
+	 */
+	bool hasPath();
+	/**
+	 * Returns whether the current path has hit its end.
+	 * @return Whether the current path is terminal.
+	 */
+	bool pathTerminal();
+	/**
+	 * Get the score of the current path.
+	 * @return The score of the current path.
+	 */
+	intptr_t currentPathScore();
+	/**
+	 * Get the score of the current path, if it ends here. Only useful for local alignment.
+	 * @return The score of the current path.
+	 */
+	intptr_t currentPathEndScore();
+	/**
+	 * Move forward to the next path step.
+	 */
+	void iterateNextPathStep();
+	/**
+	 * The current path does not match some specification, drop it. Also calls iterateNextPathStep.
+	 */
+	void abandonPath();
+	/**
+	 * This will dump out the current path.
+	 * @param aInds The place to store the one-based indices in sequence a.
+	 * @param bInds The place to store the one-based indices in sequence b.
+	 * @return The number of entries in said path.
+	 */
+	void dumpPath();
+	/**
+	 * Gets whether the last iteration changed the path being followed..
+	 * @return Whether a new starting location was added, a lower score was encountered, or a duplicate score was hit.
+	 */
+	bool lastIterationChangedPath();
+	
+	/**The size of the alignment stack.*/
+	intptr_t alnStackSize = 0;
+	/**The alignment stack.*/
+	PositionDependentAGLPFocusStackEntry* alnStack;
+	/**Starting points waiting to work over.*/
+	std::vector<PositionDependentAGLPFocusStackEntry> waitingStart;
+	/**The score for ending at the current location. Always valid, though not always useful.*/
+	intptr_t dieHereScore = 0;
+	/**Whether the last move involved a path change (initial state, push to new score, or push to another path with same score).*/
+	bool lastIterChange;
+	/**The number of bytes allocated for the stack.*/
+	uintptr_t alnStackAlloc;
+	/**Some extra stuff for this thing.*/
+	void* saveExtra;
+};
 
-/**
- * This will parse a quality effect file.
- * @param numChars The number of characters.
- * @param toParse The file to parse.
- * @param toFill The thing to fill.
- * @return Whether there was a problem.
- */
-int parseReadQualityEffectFile(int numChars, const char* toParse, std::map<std::string, PositionDependentQualityChangeSet* >* toFill);
-
-/**
- * This will free a single set of changes.
- * @param toKill The set to kill.
- */
-void freePositionDependentQualityChange(PositionDependentQualityChanges* toKill);
-
-/**
- * Free a change set.
- * @param toKill The thing to kill.
- */
-void freePositionDependentQualityChangeSet(PositionDependentQualityChangeSet* toKill);
-
-/**
- * This will modify a position dependent specification with base quality.
- * @param startPoint The original cost.
- * @param qualGuide The things to do for each quality.
- * @param readLen The length of the read.
- * @param readQual The qualities.
- * @param refLen The length of the reference.
- */
-PositionDependentAlignCostKDNode* qualifyPositionDependentSpecification(PositionDependentAlignCostKDNode* startPoint, PositionDependentQualityChangeSet* qualGuide, int readLen, const char* readQual, int refLen);
-
-/* **********************************************
- Alignment
- */
-
-/**An alignment problem to solve.*/
-typedef struct{
-	/**The number of characters in the first sequence.*/
-	int lenA;
-	/**The characters in the first sequence.*/
-	const char* seqA;
-	/**The number of characters in the second sequence.*/
-	int lenB;
-	/**The characters in the second sequence.*/
-	const char* seqB;
-	/**The number of ends in the requested alignment.*/
+/**Do alignments with a position dependent cost function.*/
+class PositionDependentAffineGapLinearPairwiseAlignment : public LinearPairwiseSequenceAlignment{
+public:
+	/**
+	 * Prepare an empty alignment structure.
+	 */
+	PositionDependentAffineGapLinearPairwiseAlignment();
+	/**
+	 * Prepare an alignment for the given sequences.
+	 * @param numSeqEnds The number of ends to require in the alignment: 0 for local, 2 for semi-local and 4 for global.
+	 * @param refSeq The reference sequence (sequence A).
+	 * @param readSeq The read sequence (sequence B).
+	 * @param alnCost The alignment parameters to use.
+	 */
+	PositionDependentAffineGapLinearPairwiseAlignment(int numSeqEnds, std::string* refSeq, std::string* readSeq, PositionDependentCostKDTree* alnCost);
+	/**Clean up.*/
+	~PositionDependentAffineGapLinearPairwiseAlignment();
+	
+	/**
+	 * Change the problem to work on.
+	 * @param numSeqEnds The number of ends to require in the alignment: 0 for local, 2 for semi-local and 4 for global.
+	 * @param refSeq The reference sequence (sequence A).
+	 * @param readSeq The read sequence (sequence B).
+	 * @param alnCost The alignment parameters to use.
+	 */
+	void changeProblem(int numSeqEnds, std::string* refSeq, std::string* readSeq, PositionDependentCostKDTree* alnCost);
+	
+	void prepareAlignmentStructure();
+	LinearPairwiseAlignmentIteration* getIteratorToken();
+	void startOptimalIteration(LinearPairwiseAlignmentIteration* theIter);
+	void startFuzzyIteration(LinearPairwiseAlignmentIteration* theIter, intptr_t minScore, intptr_t maxDupDeg, intptr_t maxNumScore);
+	
+	/**Number of ends to require in the alignment.*/
 	int numEnds;
+	/**The alignment parameters*/
+	PositionDependentCostKDTree* alnCosts;
 	/**The allocated cost table.*/
-	int** costTable;
+	intptr_t** costTable;
 	/**The scores at each place for a match.*/
-	int** matchTable;
+	intptr_t** matchTable;
 	/**The scores at each place for a match, given the last thing was a match.*/
-	int** matchMatchTable;
+	intptr_t** matchMatchTable;
 	/**The scores at each place for a match, given the last thing skipped a.*/
-	int** matchSkipATable;
+	intptr_t** matchSkipATable;
 	/**The scores at each place for a match, given the last thing skipped b.*/
-	int** matchSkipBTable;
+	intptr_t** matchSkipBTable;
 	/**The scores at each place for skipping A.*/
-	int** skipATable;
+	intptr_t** skipATable;
 	/**The scores at each place for skipping A, given the last thing was a match.*/
-	int** skipAMatchTable;
+	intptr_t** skipAMatchTable;
 	/**The scores at each place for skipping A, given the last thing skipped a.*/
-	int** skipASkipATable;
+	intptr_t** skipASkipATable;
 	/**The scores at each place for skipping A, given the last thing skipped b.*/
-	int** skipASkipBTable;
+	intptr_t** skipASkipBTable;
 	/**The scores at each place for skipping B.*/
-	int** skipBTable;
+	intptr_t** skipBTable;
 	/**The scores at each place for skipping B, given the last thing was a match.*/
-	int** skipBMatchTable;
+	intptr_t** skipBMatchTable;
 	/**The scores at each place for skipping B, given the last thing skipped a.*/
-	int** skipBSkipATable;
+	intptr_t** skipBSkipATable;
 	/**The scores at each place for skipping B, given the last thing skipped b.*/
-	int** skipBSkipBTable;
-	/**The alignment costs*/
-	PositionDependentAlignCostKDNode* alnCosts;
-} AGPDAlignProblem;
-
-/**
- * This will allocate cost tables.
- * @param toAddTo The problem to fill in.
- */
-void allocateAGPDCostTables(AGPDAlignProblem* toAddTo);
-
-/**
- * This will deallocate cost tables.
- * @param toAddTo The problem to clean up.
- */
-void deallocateAGPDCostTables(AGPDAlignProblem* toAddTo);
-
-/**
- * This will fill in the costs of an affine gap alignment problem.
- * @param toFill The problem to work on.
- */
-void fillInAGPDCostTables(AGPDAlignProblem* toFill);
-
-/**
- * This will find alignment scores.
- * @param forProb THe problem in question.
- * @param numFind THe number of scores to look for.
- * @param storeCost The place to put the found scores.
- * @param maxDupDeg The maximum number of times to hit a duplicate degraded score. Zero for no such limit.
- * @return The number of scores actually found.
- */
-int findAGPDAlignmentScores(AGPDAlignProblem* forProb, int numFind, int* storeCost, int maxDupDeg);
-
-/**A place to store an alignment.*/
-typedef struct{
-	/**The place to put the visited indices in sequence a.*/
-	int* aInds;
-	/**The place to put the visited indices in sequence b.*/
-	int* bInds;
-	/**The place to put the length of the alignment. At most lenA + lenB + 2*/
-	int alnLen;
-	/**The score of the most recent alignment.*/
-	int alnScore;
-} AlignmentFiller;
-
-/**
- * This will start an iteration through the optimal alignments.
- * @param forProb The problem to iterate through.
- * @return An iterator; type opaque.
- */
-void* initializeAGPDOptimalAlignmentIteration(AGPDAlignProblem* forProb);
-
-/**
- * This will start an iteration through the alignments within some range of optimal.
- * @param forProb The problem to iterate through.
- * @param minScore The minimum score to accept.
- * @param maxDupDeg The maximum number of times to hit a duplicate degraded score. Zero for no such limit.
- * @return An iterator; type opaque.
- */
-void* initializeAGPDFuzzedAlignmentIteration(AGPDAlignProblem* forProb, int minScore, int maxDupDeg);
-
-/**
- * This will get an alignment.
- * @param iterator The iteration structure from the initialize method.
- * @param storeLoc The place to put the alignment.
- * @return Whether there was an alignment.
- */
-int getNextAGPDAlignment(void* iterator, AlignmentFiller* storeLoc);
-
-/**
- * This will end an alignment iteration.
- * @param toTerm The iterator.
- */
-void terminateAGPDAlignmentIteration(void* toTerm);
-
-/**
- * Turns an alignment to a cigar string.
- * @param numEnt THe number of entries in the alignment.
- * @param refInds THe reference indices.
- * @param seqInds The sequence indices.
- * @param fillStr THe string to add the CIGAR to.
- * @param startAddr The place to put the start address.
- */
-void alignmentToCIGAR(int numEnt, int* refInds, int* seqInds, int seqLen, std::string* fillStr, long int* startAddr);
+	intptr_t** skipBSkipBTable;
+	
+	/**A saved allocation.*/
+	intptr_t** saveAlloc;
+	/**The size of the saved allocation.*/
+	uintptr_t saveSize;
+	/**Saved storage for costs along a row*/
+	std::vector<AlignCostAffine*> curCosts;
+	/**Saved storage for costs along a row*/
+	std::vector<AlignCostAffine*> matCosts;
+	/**Saved storage for costs along a row*/
+	std::vector<AlignCostAffine*> skaCosts;
+	/**Saved storage for costs along a row*/
+	std::vector<AlignCostAffine*> skbCosts;
+};
 
 #endif
