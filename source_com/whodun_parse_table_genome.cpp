@@ -295,9 +295,9 @@ int BAMFileReader::readNextEntry(CRBSAMFileContents* toFill){
 				toVar.clear();\
 				toVar.insert(toVar.end(), tempStore.begin() + curI, tempStore.begin() + curI + reqLen);\
 				curI += reqLen;
-			#define BAM_SIGN_SAVE_BYTE(toVar) if(toVar & 0x0080){ toVar = toVar | (-1 << 8); }
-			#define BAM_SIGN_SAVE_SHORT(toVar) if(toVar & 0x008000){ toVar = toVar | (-1 << 16); }
-			#define BAM_SIGN_SAVE_INT(toVar) if(toVar & 0x80000000){ toVar = toVar | (((int64_t)-1) << 32); }
+			#define BAM_SIGN_SAVE_BYTE(toVar) if(toVar & 0x0080){ toVar = toVar | (((uint64_t)-1) << 8); }
+			#define BAM_SIGN_SAVE_SHORT(toVar) if(toVar & 0x008000){ toVar = toVar | (((uint64_t)-1) << 16); }
+			#define BAM_SIGN_SAVE_INT(toVar) if(toVar & 0x80000000){ toVar = toVar | (((uint64_t)-1) << 32); }
 			//get the constant crap
 			int32_t refInd; BAM_READ_I32(refInd, "Reference index missing.") BAM_SIGN_SAVE_INT(refInd)
 			int32_t entryPos; BAM_READ_I32(entryPos, "Position missing.") BAM_SIGN_SAVE_INT(entryPos) toFill->entryPos = entryPos;

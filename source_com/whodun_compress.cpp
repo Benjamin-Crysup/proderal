@@ -72,6 +72,19 @@ void BlockCompOutStream::writeByte(int toW){
 	}
 }
 
+void BlockCompOutStream::writeBytes(const char* toW, uintptr_t numW){
+	const char* curFoc = toW;
+	uintptr_t addOutstand = numW;
+	while((myComp->theData.size() + addOutstand) > chunkSize){
+		uintptr_t numNeedA = chunkSize - myComp->theData.size();
+		myComp->theData.insert(myComp->theData.end(), curFoc, curFoc + numNeedA);
+		dumpCompData();
+		curFoc += numNeedA;
+		addOutstand -= numNeedA;
+	}
+	myComp->theData.insert(myComp->theData.end(), curFoc, curFoc + addOutstand);
+}
+
 uintptr_t BlockCompOutStream::tell(){
 	return preCompBS + myComp->theData.size();
 }
@@ -141,6 +154,38 @@ int BlockCompInStream::readByte(){
 	int toRet = 0x00FF & myComp->theData[nextReadI];
 	nextReadI++;
 	return toRet;
+}
+
+uintptr_t BlockCompInStream::readBytes(char* toR, uintptr_t numR){
+	uintptr_t totRead = 0;
+	char* nextR = toR;
+	uintptr_t leftR = numR;
+	
+	tailRecurTgt:
+	uintptr_t numBuff = myComp->theData.size() - nextReadI;
+	//get the remainder and return
+	if(numBuff >= leftR){
+		memcpy(nextR, &(myComp->theData[nextReadI]), leftR);
+		totRead += leftR;
+		nextReadI += leftR;
+		return totRead;
+	}
+	//get as much as you can
+	memcpy(nextR, &(myComp->theData[nextReadI]), numBuff);
+	nextReadI += numBuff;
+	totRead += numBuff;
+	nextR += numBuff;
+	leftR -= numBuff;
+	//and read a single byte
+	int nextBt = readByte();
+	if(nextBt < 0){ return totRead; }
+	//and add to the thing
+	*nextR = nextBt;
+	totRead++;
+	nextR++;
+	leftR--;
+	//and retry
+	goto tailRecurTgt;
 }
 
 void BlockCompInStream::seek(uintptr_t toAddr){
@@ -218,6 +263,11 @@ void GZipOutStream::writeByte(int toW){
 		throw std::runtime_error("Problem writing file " + myName);
 	}
 }
+void GZipOutStream::writeBytes(const char* toW, uintptr_t numW){
+	if(gzfwrite(toW, 1, numW, baseFile)!=numW){
+		throw std::runtime_error("Problem writing file " + myName);
+	}
+}
 
 GZipInStream::GZipInStream(const char* fileName){
 	myName = fileName;
@@ -243,6 +293,21 @@ int GZipInStream::readByte(){
 		}
 	}
 	return toR;
+}
+uintptr_t GZipInStream::readBytes(char* toR, uintptr_t numR){
+	uintptr_t toRet = gzfread(toR, 1, numR, baseFile);
+	if(toRet != numR){
+		int gzerrcode;
+		const char* errMess = gzerror(baseFile, &gzerrcode);
+		if(gzerrcode && (gzerrcode != Z_STREAM_END)){
+			std::string errRep = "Problem reading file ";
+				errRep.append(myName);
+				errRep.append(" : ");
+				errRep.append(errMess);
+			throw std::runtime_error(errRep);
+		}
+	}
+	return toRet;
 }
 
 RawCompressionMethod::~RawCompressionMethod(){}

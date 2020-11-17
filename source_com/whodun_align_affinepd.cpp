@@ -1475,7 +1475,7 @@ intptr_t focusStackGuardFlag(intptr_t fI, intptr_t fJ, intptr_t dirFlag){
  * @param pathSc The score of the path this is on.
  * @param howG How this node was arrived at. 0 for start.
  */
-#define NEW_FOCUS_STACK_ENTRY(fI, fJ, dirFlag, pathSc, howG) {fI, fJ, focusStackGuardFlag(fI,fJ,dirFlag), pathSc, howG, 0}
+#define NEW_FOCUS_STACK_ENTRY(fI, fJ, dirFlag, pathSc, howG) (PositionDependentAGLPFocusStackEntry){fI, fJ, focusStackGuardFlag(fI,fJ,dirFlag), pathSc, howG, 0}
 
 /**
  * Sorting method for stack starting locations.
@@ -1491,7 +1491,9 @@ bool stackStartPositionSortFunction(const std::pair<intptr_t,PositionDependentAG
 class PositionDependentAGLPFocusStackStarts{
 public:
 	/**Sets up an empty set of stack starts.*/
-	PositionDependentAGLPFocusStackStarts(){}
+	PositionDependentAGLPFocusStackStarts(){
+		curSorted = false;
+	}
 	/**Delete memory.*/
 	~PositionDependentAGLPFocusStackStarts(){
 	}
@@ -1557,7 +1559,7 @@ public:
 		}
 	}
 	/**Whether the thing is currently sorted.*/
-	bool curSorted = false;
+	bool curSorted;
 	/**The starting locations of interest, with their scores as a key.*/
 	std::vector< std::pair<intptr_t,PositionDependentAGLPFocusStackEntry> > startingLocs;
 	/**Save a set for use*/
@@ -1652,6 +1654,8 @@ void findStartingPositions(PositionDependentAffineGapLinearPairwiseAlignment* fo
 }
 
 PositionDependentAffineGapLinearPairwiseAlignmentIteration::PositionDependentAffineGapLinearPairwiseAlignmentIteration(PositionDependentAffineGapLinearPairwiseAlignment* forAln) : LinearPairwiseAlignmentIteration(forAln){
+	alnStackSize = 0;
+	dieHereScore = 0;
 	alnStackAlloc = 16 * sizeof(PositionDependentAGLPFocusStackEntry);
 	alnStack = (PositionDependentAGLPFocusStackEntry*)malloc(alnStackAlloc);
 	saveExtra = new PositionDependentAGLPFocusStackStarts();
@@ -1666,7 +1670,7 @@ void PositionDependentAffineGapLinearPairwiseAlignmentIteration::changeProblem(P
 	maxDupDeg = 0;
 	maxNumScore = 1;
 	findStartingPositions(forAln, maxNumScore, saveStarts);
-	saveStarts->limitStartingLocationsByScore(1);
+	saveStarts->limitStartingLocationScores(1);
 	minScore = saveStarts->startingLocs[0].first;
 	waitingStart.resize(saveStarts->startingLocs.size());
 	uintptr_t i = saveStarts->startingLocs.size();

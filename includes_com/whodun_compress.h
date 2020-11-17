@@ -25,6 +25,11 @@ public:
 	std::vector<char> compData;
 };
 
+/**Bytes for an annotation entry.*/
+#define BLOCKCOMP_ANNOT_ENTLEN 32
+/**The number of entries to load in memory: less jumping.*/
+#define BLOCKCOMPIN_LASTLINESEEK 1024
+
 /**Block compress output.*/
 class BlockCompOutStream : public OutStream{
 public:
@@ -40,6 +45,7 @@ public:
 	/**Clean up and close.*/
 	~BlockCompOutStream();
 	void writeByte(int toW);
+	void writeBytes(const char* toW, uintptr_t numW);
 	/**Get the number of (uncompressed) bytes already written.*/
 	uintptr_t tell();
 	/**Dump the data.*/
@@ -58,11 +64,6 @@ public:
 	CompressionMethod* myComp;
 };
 
-/**Bytes for an annotation entry.*/
-#define BLOCKCOMP_ANNOT_ENTLEN 32
-/**The number of entries to load in memory: less jumping.*/
-#define BLOCKCOMPIN_LASTLINESEEK 1024
-
 /**Read a block compressed input stream.*/
 class BlockCompInStream : public InStream{
 public:
@@ -76,6 +77,7 @@ public:
 	/**Clean up and close.*/
 	~BlockCompInStream();
 	int readByte();
+	uintptr_t readBytes(char* toR, uintptr_t numR);
 	/**
 	 * Change which byte will be returned next.
 	 * @param toAddr The (pre-compression) address.
@@ -104,6 +106,8 @@ public:
 	CompressionMethod* myComp;
 };
 
+//TODO multithreaded block compression (input and output)
+
 /**Out to gzip file.*/
 class GZipOutStream : public OutStream{
 public:
@@ -116,6 +120,7 @@ public:
 	/**Clean up and close.*/
 	~GZipOutStream();
 	void writeByte(int toW);
+	void writeBytes(const char* toW, uintptr_t numW);
 	/**The base file.*/
 	gzFile baseFile;
 	/**The name of the file.*/
@@ -133,6 +138,7 @@ public:
 	/**Clean up and close.*/
 	~GZipInStream();
 	int readByte();
+	uintptr_t readBytes(char* toR, uintptr_t numR);
 	/**The base file.*/
 	gzFile baseFile;
 	/**The name of the file.*/

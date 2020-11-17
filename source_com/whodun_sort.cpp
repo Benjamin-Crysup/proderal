@@ -570,3 +570,75 @@ void outOfMemoryMergesort(InStream* startF, const char* tempFolderName, OutStrea
 			nxtStoreNP = tmpPref;
 		}
 }
+
+PreSortMultithreadPipe::PreSortMultithreadPipe(uintptr_t numSave) : drainCon(&drainMut){
+	maxBuff = numSave;
+	endWrite = false;
+}
+
+void PreSortMultithreadPipe::writeBytes(const char* toW, uintptr_t numW){
+	const char* curFoc = toW;
+	uintptr_t numLeft = numW;
+	
+	writeMut.lock();
+	drainMut.lock();
+		if(endWrite){ throw std::runtime_error("Cannot write to closed pipe."); }
+		while(numLeft){
+			while(datBuff.size() >= maxBuff){ drainCon.wait(); }
+			uintptr_t numAdd = maxBuff - datBuff.size(); numAdd = std::min(numAdd, numLeft);
+			datBuff.insert(datBuff.end(), curFoc, curFoc+numAdd);
+			curFoc += numAdd;
+			numLeft -= numAdd;
+			drainCon.signal();
+		}
+	drainMut.unlock();
+	writeMut.unlock();
+}
+
+void PreSortMultithreadPipe::closeWrite(){
+	writeMut.lock();
+	drainMut.lock();
+		endWrite = true;
+		drainCon.broadcast();
+	drainMut.unlock();
+	writeMut.unlock();
+}
+
+int PreSortMultithreadPipe::readByte(){
+	int toRet = -1;
+	drainMut.lock();
+		while(!endWrite && (datBuff.size()==0)){ drainCon.wait(); }
+		if(datBuff.size()){
+			toRet = datBuff[0];
+			datBuff.pop_front();
+		}
+	drainMut.unlock();
+	return toRet;
+}
+
+uintptr_t PreSortMultithreadPipe::readBytes(char* toR, uintptr_t numR){
+	char* curFoc = toR;
+	uintptr_t numLeft = numR;
+	uintptr_t totRead = 0;
+	
+	drainMut.lock();
+		while(numLeft){
+			while(!endWrite && (datBuff.size()==0)){ drainCon.wait(); }
+			if(datBuff.size()){
+				uintptr_t numCpy = std::min(numLeft, datBuff.size());
+				std::copy(datBuff.begin(), datBuff.begin() + numCpy, curFoc);
+				datBuff.erase(datBuff.begin(), datBuff.begin() + numCpy);
+				curFoc += numCpy;
+				numLeft -= numCpy;
+				totRead += numCpy;
+			}
+			else{
+				numLeft = 0;
+			}
+			drainCon.signal();
+		}
+	drainMut.unlock();
+	return totRead;
+}
+
+

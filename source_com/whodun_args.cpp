@@ -175,6 +175,12 @@ ArgumentParserStrVecMeta& ArgumentParserStrVecMeta::operator=(const ArgumentPars
 }
 
 ArgumentParser::ArgumentParser(){
+	needRun = 1;
+	myMainDoc = "ADD SOME DAMN DOCUMENTATION!\n";
+	myVersionDoc = "69 Bottles of Beer on the Wall\n";
+	myCopyrightDoc = "Copyright (C) 1066 The French\n";
+	myLicenseDoc = "License LGPLv3+: GNU LGPL version 3 or later\n    <https://www.gnu.org/licenses/lgpl-3.0.html>\nThis is free software: you are free to change and redistribute it.\n";
+	myWarrantyDoc = "There is NO WARRANTY, to the extent permitted by law.\n";
 }
 
 ArgumentParser::~ArgumentParser(){
@@ -199,6 +205,7 @@ int ArgumentParser::parseArguments(int argc, char** argv, std::ostream* helpOut)
 			needRun = 0;
 			return ci+1;
 		}
+		//TODO @filenam load
 		if(boolHotFlags.find(carg) != boolHotFlags.end()){
 			*boolHotFlags[carg] = true;
 			ci++; continue;

@@ -213,7 +213,7 @@ public:
 	int parseArguments(int argc, char** argv, std::ostream* helpOut);
 	
 	/**Whether the program should try to run.*/
-	int needRun = 1;
+	int needRun;
 	/**Whether there was an error (and error message).*/
 	std::string argumentError;
 	
@@ -223,7 +223,7 @@ public:
 	 */
 	void printHelpDocumentation(std::ostream* toPrint);
 	/**The main documentation for the program.*/
-	const char* myMainDoc = "FUCKING HELL ADD SOME DOCUMENTATION!\n";
+	const char* myMainDoc;
 	/**Documentation for each argument.*/
 	std::map<std::string,const char*> argDocs;
 	
@@ -233,13 +233,13 @@ public:
 	 */
 	void printVersionInformation(std::ostream* toPrint);
 	/**The version of this software.*/
-	const char* myVersionDoc = "FUCKNUGGETS 69\n";
+	const char* myVersionDoc;
 	/**The copyright date of this software.*/
-	const char* myCopyrightDoc = "Copyright (C) 1066 The French\n";
+	const char* myCopyrightDoc;
 	/**The license information. The default is LGPL.*/
-	const char* myLicenseDoc = "License LGPLv3+: GNU LGPL version 3 or later\n    <https://www.gnu.org/licenses/lgpl-3.0.html>\nThis is free software: you are free to change and redistribute it.\n";
+	const char* myLicenseDoc;
 	/**Warranty disclaimer.*/
-	const char* myWarrantyDoc = "There is NO WARRANTY, to the extent permitted by law.\n";
+	const char* myWarrantyDoc;
 	
 	/**
 	 * Print information for building a gui.

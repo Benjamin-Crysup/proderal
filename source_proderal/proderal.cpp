@@ -18,6 +18,21 @@
 class ProderalArgumentParser : public ArgumentParser{
 public:
 	ProderalArgumentParser(){
+		outFileN = 0;
+		refFile = 0;
+		probFile = 0;
+		hitAll = false;
+		costFile = 0;
+		overRun = 20;
+		maxExpand = -1;
+		numEnds = 2;
+		uptoRank = 0;
+		uptoCount = 1;
+		recSoft = 0;
+		qualmFile = 0;
+		hotfuzz = 0;
+		numThread = 1;
+		preserveOrder = false;
 		defOutFN[0] = '-'; defOutFN[1] = 0;
 		myMainDoc = "Usage: proderal [OPTION] [FILE]\n"
 			"Realigns entries in a SAM file that map to problematic regions.\n"
@@ -131,35 +146,35 @@ public:
 		return 0;
 	}
 	/**The output file.*/
-	char* outFileN = 0;
+	char* outFileN;
 	/**The reference file.*/
-	char* refFile = 0;
+	char* refFile;
 	/**The problem region file.*/
-	char* probFile = 0;
+	char* probFile;
 	/**Whether all regions should be realigned.*/
-	bool hitAll = false;
+	bool hitAll;
 	/**The cost specification file.*/
-	char* costFile = 0;
+	char* costFile;
 	/**The amount of overrun for region realign.*/
-	intptr_t overRun = 20;
+	intptr_t overRun;
 	/**The maximum number of bases to expand a realign region*/
-	intptr_t maxExpand = -1;
+	intptr_t maxExpand;
 	/**The number of ends in the alignment.*/
-	intptr_t numEnds = 2;
+	intptr_t numEnds;
 	/**The worst rank to look at.*/
-	intptr_t uptoRank = 0;
+	intptr_t uptoRank;
 	/**The number of alignments to report.*/
-	intptr_t uptoCount = 1;
+	intptr_t uptoCount;
 	/**Try to reclaim soft clipped bases.*/
-	intptr_t recSoft = 0;
+	intptr_t recSoft;
 	/**The quality mangle file.*/
-	char* qualmFile = 0;
+	char* qualmFile;
 	/**The maximum number of times to see a score before stopping.*/
-	intptr_t hotfuzz = 0;
+	intptr_t hotfuzz;
 	/**The number of threads to use.*/
-	intptr_t numThread = 1;
+	intptr_t numThread;
 	/**Whether to preserve order.*/
-	bool preserveOrder = false;
+	bool preserveOrder;
 	/**All input sam files.*/
 	std::vector<const char*> allSamIn;
 	/**The default output name.*/
@@ -263,7 +278,9 @@ public:
 /**Extra information on the results of an alignment (and allocation storage).*/
 class PairedEndAlignmentSpecialFlags{
 public:
-	
+	PairedEndAlignmentSpecialFlags(){
+		alnIterSave = 0;
+	}
 	~PairedEndAlignmentSpecialFlags(){
 		if(alnIterSave){ delete(alnIterSave); }
 	}
@@ -312,7 +329,7 @@ public:
 	/**Storage for the alignment tables.*/
 	PositionDependentAffineGapLinearPairwiseAlignment alnTables;
 	/**The saved iteration token.*/
-	LinearPairwiseAlignmentIteration* alnIterSave = 0;
+	LinearPairwiseAlignmentIteration* alnIterSave;
 };
 
 /**
@@ -325,7 +342,7 @@ public:
  */
 void alignSingleSequence(CRBSAMFileContents* origSeq, PairedAlignmentResultData* storeAln, PairedEndAlignmentSpecialFlags* storeFlag, ProderalArgumentParser* argsP, void* errLock){
 	std::greater<intptr_t> compMeth;
-	intptr_t worstScore = ((intptr_t)-1) << (8*sizeof(intptr_t) - 1);
+	intptr_t worstScore = ((uintptr_t)-1) << (8*sizeof(uintptr_t) - 1);
 	uintptr_t maxCount = argsP->uptoCount;
 	char numBuffer[4*sizeof(intptr_t)+4];
 	std::pair<intptr_t,intptr_t> mainBnd = std::pair<intptr_t,intptr_t>(-1,-1);
@@ -772,12 +789,12 @@ try{
 	//start up the work threads
 		threadArgs.resize(argsP.numThread);
 		for(intptr_t i = 0; i<argsP.numThread; i++){
-			threadArgs[i] = {errLock, &argsP, &entCache, &taskPCC, &resPCC};
+			threadArgs[i] = (PairedEndThreadArgs){errLock, &argsP, &entCache, &taskPCC, &resPCC};
 			liveThread.push_back(startThread(pairAlignDoThing, &(threadArgs[i])));
 		}
 	//start up the output thread
 		openCRBSamFileWrite(argsP.outFileN, &curOutF, &curOutT, &curOut);
-		finOutA = {errLock, curOut, &argsP, &resPCC};
+		finOutA = (FinalOutputThreadArgs){errLock, curOut, &argsP, &resPCC};
 		finOutT = startThread(outputFinalResults, &finOutA);
 	//run down the files
 		uintptr_t numTaskIn = 0;

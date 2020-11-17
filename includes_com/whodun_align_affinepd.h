@@ -338,13 +338,13 @@ private:
 	bool lastIterationChangedPath();
 	
 	/**The size of the alignment stack.*/
-	intptr_t alnStackSize = 0;
+	intptr_t alnStackSize;
 	/**The alignment stack.*/
 	PositionDependentAGLPFocusStackEntry* alnStack;
 	/**Starting points waiting to work over.*/
 	std::vector<PositionDependentAGLPFocusStackEntry> waitingStart;
 	/**The score for ending at the current location. Always valid, though not always useful.*/
-	intptr_t dieHereScore = 0;
+	intptr_t dieHereScore;
 	/**Whether the last move involved a path change (initial state, push to new score, or push to another path with same score).*/
 	bool lastIterChange;
 	/**The number of bytes allocated for the stack.*/
