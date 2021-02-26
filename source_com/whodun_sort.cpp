@@ -1,5 +1,6 @@
 #include "whodun_sort.h"
 
+#include <deque>
 #include <assert.h>
 #include <iostream>
 #include <stdexcept>
@@ -8,126 +9,48 @@
 #include "whodun_oshook.h"
 #include "whodun_stringext.h"
 
-/**
- * Do the merge for mergesort.
- * @param numEntA The number of items in the first list.
- * @param entsA The first list.
- * @param numEntB The number of items in the second list.
- * @param entsB The second list.
- * @param opts The sort options.
- * @param entsEnd The place to put the merged lists.
- */
-void inMemoryMergesortMerge(uintptr_t numEntA, char* entsA, uintptr_t numEntB, char* entsB, SortOptions* opts, char* entsEnd){
-	uintptr_t itemSize = opts->itemSize;
-	uintptr_t numEntAT = numEntA;
-	uintptr_t numEntBT = numEntB;
-	char* curTgt = entsEnd;
-	char* curSrcA = entsA;
-	char* curSrcB = entsB;
-	while(numEntAT && numEntBT){
-		if(opts->compMeth(curSrcA, curSrcB)){
-			memcpy(curTgt, curSrcA, itemSize);
-			curTgt += itemSize;
-			curSrcA += itemSize;
-			numEntAT--;
-		}
-		else{
-			memcpy(curTgt, curSrcB, itemSize);
-			curTgt += itemSize;
-			curSrcB += itemSize;
-			numEntBT--;
-		}
-	}
-	while(numEntAT){
-		memcpy(curTgt, curSrcA, itemSize);
-		curTgt += itemSize;
-		curSrcA += itemSize;
-		numEntAT--;
-	}
-	while(numEntBT){
-		memcpy(curTgt, curSrcB, itemSize);
-		curTgt += itemSize;
-		curSrcB += itemSize;
-		numEntBT--;
-	}
-}
+#define MULTMERGE_BUFF_SIZE 65536
 
-/**
- * This does an in-memory mergesort, using an allocated pool.
- * @param numEnts The number of entities to work over.
- * @param inMem The original data (and the place to put the sorted array.
- * @param opts The sort options.
- * @param allocPoot The pre-allocated pool for "malloc".
- */
-void inMemoryMergesortPreA(uintptr_t numEnts, char* inMem, SortOptions* opts, char* allocPoot){
-	if(numEnts > 1){
-		uintptr_t itemSize = opts->itemSize;
-		//get the first half of the list sorted
-		uintptr_t numEntA = numEnts >> 1;
-		char* subEntA = allocPoot;
-		memcpy(subEntA, inMem, numEntA*itemSize);
-		inMemoryMergesortPreA(numEntA, subEntA, opts, allocPoot + numEntA*itemSize);
-		//get the second half of the list sorted
-		uintptr_t numEntB = numEnts - numEntA;
-		char* subEntB = allocPoot + numEntA*itemSize;
-		memcpy(subEntB, inMem + numEntA*itemSize, numEntB*itemSize);
-		inMemoryMergesortPreA(numEntB, subEntB, opts, allocPoot + numEnts*itemSize);
-		//merge the two lists
-		inMemoryMergesortMerge(numEntA, subEntA, numEntB, subEntB, opts, inMem);
-	}
-}
-
-/**A node for multiple merging.*/
+/**A node in a merge cluster.*/
 class MultimergeNode{
 public:
 	/**Sorting options.*/
 	SortOptions* opts;
-	/**Mutex on the merge buffer.*/
-	void* mbMut;
-	/**Condition for singaling buffer full and buffer empty.*/
-	void* mbCond;
-	/**The files have been exhausted.*/
-	int mergeEnded;
-	/**The number of entries the merge buffer can hold.*/
-	uintptr_t mergeSize;
-	/**The number of entries the merge buffer has.*/
-	uintptr_t mergeReady;
-	/**The offset to the first ready entry in the merge buffer.*/
-	uintptr_t mergeOffset;
-	/**The place to store merged data.*/
-	char* mergeBuffer;
+	/**The stuff in the buffer is all that is left.*/
+	int entExhaust;
+	/**The waiting entities.*/
+	std::deque<char> entQ;
+	/**The maximum size for the queue (bytes).*/
+	uintptr_t queueSize;
 	/**
 	 * Set up an empty buffer.
 	 * @param myOpts The sorting options to use.
 	 * @param buffSize The number of entries to store in the buffer.
 	 */
-	MultimergeNode(SortOptions* myOpts, uintptr_t buffSize){
-		opts = myOpts;
-		mbMut = makeMutex();
-		mbCond = makeCondition(mbMut);
-		mergeEnded = 0;
-		mergeSize = buffSize;
-		mergeReady = 0;
-		mergeOffset = 0;
-		mergeBuffer = (char*)malloc(mergeSize*opts->itemSize);
-	}
+	MultimergeNode(SortOptions* myOpts, uintptr_t buffSize);
 	/**Clean up.*/
-	virtual ~MultimergeNode(){
-		killCondition(mbCond);
-		killMutex(mbMut);
-		free(mergeBuffer);
-	}
-	/**Do the merging operation of this node.*/
-	virtual void doMerging() = 0;
+	virtual ~MultimergeNode();
+	/**Fill this buffer.*/
+	virtual void fillBuffer() = 0;
 };
+
+MultimergeNode::MultimergeNode(SortOptions* myOpts, uintptr_t buffSize){
+	opts = myOpts;
+	entExhaust = 0;
+	queueSize = opts->itemSize * buffSize;
+}
+
+MultimergeNode::~MultimergeNode(){}
+
+/**Thread function: fill a merge node.*/
+void mergeSortFillMergeNode(void* myU){
+	MultimergeNode* nodeFill = (MultimergeNode*)myU;
+	nodeFill->fillBuffer();
+}
 
 /**Merge from in memory buffers.*/
 class MemoryBufferMergeNode : public MultimergeNode{
 public:
-	/**The number of entities left in the first buffer.*/
-	uintptr_t numLeftA;
-	/**The next entity in the first buffer.*/
-	char* nextEntA;
 	/**
 	 * Merge two memory buffers.
 	 * @param myOpts The sorting options to use.
@@ -135,38 +58,38 @@ public:
 	 * @param buffAS The size of the first buffer.
 	 * @param buffA The first buffer.
 	 */
-	MemoryBufferMergeNode(SortOptions* myOpts, uintptr_t buffSize, uintptr_t buffAS, char* buffA) : MultimergeNode(myOpts, buffSize) {
-		numLeftA = buffAS;
-		nextEntA = buffA;
-	}
-	void doMerging(){
-		lockMutex(mbMut);
-		uintptr_t itemSize = opts->itemSize;
-		while(numLeftA){
-			while(mergeReady == mergeSize){ waitCondition(mbMut, mbCond); }
-			uintptr_t copyTgtInd = (mergeOffset + mergeReady) % mergeSize;
-			uintptr_t numCopy = mergeSize - mergeReady;
-				uintptr_t maxLinear = mergeSize - copyTgtInd; if(maxLinear < numCopy){ numCopy = maxLinear; }
-				if(numLeftA < numCopy){ numCopy = numLeftA; }
-			memcpy(mergeBuffer + itemSize*copyTgtInd, nextEntA, numCopy*itemSize);
-			nextEntA += (itemSize*numCopy);
-			mergeReady += numCopy;
-			numLeftA -= numCopy;
-			signalCondition(mbMut, mbCond);
-		}
-		mergeEnded = 1;
-		signalCondition(mbMut, mbCond);
-		unlockMutex(mbMut);
-	}
+	MemoryBufferMergeNode(SortOptions* myOpts, uintptr_t buffSize, uintptr_t buffAS, char* buffA);
+	/**Clean up.*/
+	~MemoryBufferMergeNode();
+	/**Fill this buffer.*/
+	void fillBuffer();
+	/**The number of entities left in the first buffer.*/
+	uintptr_t numLeftA;
+	/**The next entity in the first buffer.*/
+	char* nextEntA;
 };
+
+MemoryBufferMergeNode::MemoryBufferMergeNode(SortOptions* myOpts, uintptr_t buffSize, uintptr_t buffAS, char* buffA) : MultimergeNode(myOpts, buffSize){
+	numLeftA = buffAS * myOpts->itemSize;
+	nextEntA = buffA;
+}
+
+MemoryBufferMergeNode::~MemoryBufferMergeNode(){}
+
+void MemoryBufferMergeNode::fillBuffer(){
+	uintptr_t numGet = queueSize - entQ.size();
+		numGet = std::min(numGet, numLeftA);
+	entQ.insert(entQ.end(), nextEntA, nextEntA + numGet);
+	nextEntA += numGet;
+	numLeftA -= numGet;
+	if(numLeftA == 0){
+		entExhaust = 1;
+	}
+}
 
 /**Merge two other merge nodes.*/
 class MergeNodeMergeNode : public MultimergeNode{
 public:
-	/**The first node to merge.*/
-	MultimergeNode* srcA;
-	/**The second node to merge.*/
-	MultimergeNode* srcB;
 	/**
 	 * Merge two merge nodes.
 	 * @param myOpts The sorting options to use.
@@ -174,272 +97,339 @@ public:
 	 * @param sourceA The first node to merge.
 	 * @param sourceB The second node to merge.
 	 */
-	MergeNodeMergeNode(SortOptions* myOpts, uintptr_t buffSize, MultimergeNode* sourceA, MultimergeNode* sourceB) : MultimergeNode(myOpts, buffSize) {
-		srcA = sourceA;
-		srcB = sourceB;
-	}
-	void doMerging(){
-		uintptr_t itemSize = opts->itemSize;
-		while(true){
-			//make sure A has some
-			uintptr_t numInA;
-			lockMutex(srcA->mbMut);
-				while(!(srcA->mergeReady || srcA->mergeEnded)){ waitCondition(srcA->mbMut, srcA->mbCond); }
-				numInA = srcA->mergeReady;
-			unlockMutex(srcA->mbMut);
-			//make sure B has some
-			uintptr_t numInB;
-			lockMutex(srcB->mbMut);
-				while(!(srcB->mergeReady || srcB->mergeEnded)){ waitCondition(srcB->mbMut, srcB->mbCond); }
-				numInB = srcB->mergeReady;
-			unlockMutex(srcB->mbMut);
-			//fill this buffer
-			if(!(numInA || numInB)){
+	MergeNodeMergeNode(SortOptions* myOpts, uintptr_t buffSize, MultimergeNode* sourceA, MultimergeNode* sourceB);
+	/**Clean up.*/
+	~MergeNodeMergeNode();
+	/**Fill this buffer.*/
+	void fillBuffer();
+	/**The first node to merge.*/
+	MultimergeNode* srcA;
+	/**The second node to merge.*/
+	MultimergeNode* srcB;
+	/**The next entity from A.*/
+	std::vector<char> tmpSaveA;
+	/**The next entity from B.*/
+	std::vector<char> tmpSaveB;
+};
+
+MergeNodeMergeNode::MergeNodeMergeNode(SortOptions* myOpts, uintptr_t buffSize, MultimergeNode* sourceA, MultimergeNode* sourceB) : MultimergeNode(myOpts, buffSize){
+	srcA = sourceA;
+	srcB = sourceB;
+}
+
+MergeNodeMergeNode::~MergeNodeMergeNode(){
+}
+
+void MergeNodeMergeNode::fillBuffer(){
+	uintptr_t itemSize = opts->itemSize;
+	while(entQ.size() < queueSize){
+		//get entities for A and B
+		if(tmpSaveA.size() == 0){
+			if(srcA->entQ.size()){
+				tmpSaveA.insert(tmpSaveA.end(), srcA->entQ.begin(), srcA->entQ.begin() + itemSize);
+				srcA->entQ.erase(srcA->entQ.begin(), srcA->entQ.begin() + itemSize);
+			}
+			else{
+				if(srcA->entExhaust == 0){ break; }
+			}
+		}
+		if(tmpSaveB.size() == 0){
+			if(srcB->entQ.size()){
+				tmpSaveB.insert(tmpSaveB.end(), srcB->entQ.begin(), srcB->entQ.begin() + itemSize);
+				srcB->entQ.erase(srcB->entQ.begin(), srcB->entQ.begin() + itemSize);
+			}
+			else{
+				if(srcB->entExhaust == 0){ break; }
+			}
+		}
+		//merge
+		if(tmpSaveA.size()){
+			if(tmpSaveB.size()){
+				if(opts->compMeth(opts->useUni, &(tmpSaveA[0]), &(tmpSaveB[0]))){
+					entQ.insert(entQ.end(), tmpSaveA.begin(), tmpSaveA.end());
+					tmpSaveA.clear();
+				}
+				else{
+					entQ.insert(entQ.end(), tmpSaveB.begin(), tmpSaveB.end());
+					tmpSaveB.clear();
+				}
+			}
+			else{
+				entQ.insert(entQ.end(), tmpSaveA.begin(), tmpSaveA.end());
+				tmpSaveA.clear();
+			}
+		}
+		else{
+			if(tmpSaveB.size()){
+				entQ.insert(entQ.end(), tmpSaveB.begin(), tmpSaveB.end());
+				tmpSaveB.clear();
+			}
+			else{
+				entExhaust = 1;
 				break;
 			}
-			lockMutex(mbMut);
-				while(mergeReady == mergeSize){ waitCondition(mbMut, mbCond); }
-				uintptr_t numCopy = mergeSize - mergeReady;
-					if(numInA && (numInA < numCopy)){ numCopy = numInA; }
-					if(numInB && (numInB < numCopy)){ numCopy = numInB; }
-				lockMutex(srcA->mbMut);
-				lockMutex(srcB->mbMut);
-				for(uintptr_t i = 0; i<numCopy; i++){
-					char* curTgt = mergeBuffer + (itemSize * ((mergeOffset + mergeReady) % mergeSize));
-					char* nextEntA = srcA->mergeBuffer + (itemSize * srcA->mergeOffset);
-					char* nextEntB = srcB->mergeBuffer + (itemSize * srcB->mergeOffset);
-					if(numInA){
-						if(numInB){
-							if(opts->compMeth(nextEntA, nextEntB)){
-								memcpy(curTgt, nextEntA, itemSize);
-								mergeReady++;
-								srcA->mergeReady--;
-								srcA->mergeOffset = (srcA->mergeOffset + 1) % srcA->mergeSize;
-							}
-							else{
-								memcpy(curTgt, nextEntB, itemSize);
-								mergeReady++;
-								srcB->mergeReady--;
-								srcB->mergeOffset = (srcB->mergeOffset + 1) % srcB->mergeSize;
-							}
-						}
-						else{
-							memcpy(curTgt, nextEntA, itemSize);
-							mergeReady++;
-							srcA->mergeReady--;
-							srcA->mergeOffset = (srcA->mergeOffset + 1) % srcA->mergeSize;
-						}
-					}
-					else{
-						memcpy(curTgt, nextEntB, itemSize);
-						mergeReady++;
-						srcB->mergeReady--;
-						srcB->mergeOffset = (srcB->mergeOffset + 1) % srcB->mergeSize;
-					}
-				}
-				signalCondition(srcA->mbMut, srcA->mbCond);
-				unlockMutex(srcA->mbMut);
-				signalCondition(srcB->mbMut, srcB->mbCond);
-				unlockMutex(srcB->mbMut);
-				signalCondition(mbMut, mbCond);
-			unlockMutex(mbMut);
 		}
-		lockMutex(mbMut);
-			mergeEnded = 1;
-			signalCondition(mbMut, mbCond);
-		unlockMutex(mbMut);
 	}
-};
+}
 
 /**Reads from a file.*/
 class FileSourceMergeNode : public MultimergeNode{
 public:
-	/**The file to read from.*/
-	InStream* datSrc;
 	/**
 	 * Merge two merge nodes.
 	 * @param myOpts The sorting options to use.
 	 * @param buffSize The number of entries to store in the buffer.
 	 * @param readFrom The file to read from.
 	 */
-	FileSourceMergeNode(SortOptions* myOpts, uintptr_t buffSize, InStream* readFrom) : MultimergeNode(myOpts, buffSize) {
-		datSrc = readFrom;
-	}
-	void doMerging(){
-		uintptr_t itemSize = opts->itemSize;
-		lockMutex(mbMut);
-		while(true){
-			while(mergeReady == mergeSize){ waitCondition(mbMut, mbCond); }
-			uintptr_t copyTgtInd = (mergeOffset + mergeReady) % mergeSize;
-			char* curTgt = mergeBuffer + (itemSize * copyTgtInd);
-			uintptr_t numCopy = mergeSize - mergeReady;
-				uintptr_t maxLinear = mergeSize - copyTgtInd; if(maxLinear < numCopy){ numCopy = maxLinear; }
-			uintptr_t numRB = datSrc->readBytes(curTgt, numCopy*itemSize);
-			uintptr_t numRItem = numRB / itemSize;
-			mergeReady += numRItem;
-			signalCondition(mbMut, mbCond);
-			if(numRItem != numCopy){ break; }
-		}
-		mergeEnded = 1;
-		signalCondition(mbMut, mbCond);
-		unlockMutex(mbMut);
-	}
+	FileSourceMergeNode(SortOptions* myOpts, uintptr_t buffSize, InStream* readFrom);
+	/**Clean up.*/
+	~FileSourceMergeNode();
+	/**Fill this buffer.*/
+	void fillBuffer();
+	/**The file to read from.*/
+	InStream* datSrc;
+	/**Temporary storage for loading.*/
+	std::vector<char> tmpLoad;
 };
 
-/**
- * Actually run a merge.
- * @param myUni The MultimergeNode.
- */
-void mergeTreeSubFun(void* myUni){
-	MultimergeNode* theTask = (MultimergeNode*)myUni;
-	theTask->doMerging();
+FileSourceMergeNode::FileSourceMergeNode(SortOptions* myOpts, uintptr_t buffSize, InStream* readFrom) : MultimergeNode(myOpts, buffSize){
+	datSrc = readFrom;
+	tmpLoad.resize(queueSize);
 }
 
-/**Options to a multithreaded merge sort in memory.*/
-typedef struct{
-	/**The number of entities.*/
-	uintptr_t numEnts;
-	/**The things to sort.*/
-	char* inMem;
-	/**The sorting options.*/
-	SortOptions* opts;
-	/**Sync option.*/
-	ThreadMultiWait* myReport;
-} InMemMergeSortOpts;
-
-/**
- * Used for the initial sorts.
- * @param myUni The thread uniform.
- */
-void inMemMultThreadMergeSort(void* myUni){
-	InMemMergeSortOpts* myRealUni = (InMemMergeSortOpts*)myUni;
-	inMemoryMergesort(myRealUni->numEnts, myRealUni->inMem, myRealUni->opts);
-	myRealUni->myReport->unwaitOne();
+FileSourceMergeNode::~FileSourceMergeNode(){
 }
 
-#define SUB_THREAD_BUFFER_SIZE 65536
-
-/**
- * Use a pool of threads: private because pools do not preempt.
- * @param numEnts The number of entries.
- * @param inMem The things to sort.
- * @param opts The options.
- * @param reusePool The thread pool to use.
- */
-void inMemoryMergesortPool(uintptr_t numEnts, char* inMem, SortOptions* opts, ThreadPool* reusePool){
+void FileSourceMergeNode::fillBuffer(){
 	uintptr_t itemSize = opts->itemSize;
-	char* arrCopy = (char*)malloc(numEnts*itemSize);
-	std::vector<MultimergeNode*> allMNodes;
-	ThreadMultiWait reuseWait;
-	SortOptions subOpts = *opts;
-	subOpts.numThread = 1;
-	uintptr_t mbufNumEnt = SUB_THREAD_BUFFER_SIZE / itemSize; if(mbufNumEnt < 2){ mbufNumEnt = 2; }
-	uintptr_t numPerT = numEnts / opts->numThread;
-	uintptr_t numExtT = numEnts % opts->numThread;
-	uintptr_t curOff;
-	//copy the memory
-		memcpymt(arrCopy, inMem, numEnts*itemSize, opts->numThread, reusePool);
-	//sort each piece
-		std::vector<InMemMergeSortOpts> allSubSortOpts;
-		allSubSortOpts.resize(opts->numThread);
-		curOff = 0;
-		for(uintptr_t i = 0; i<opts->numThread; i++){
-			uintptr_t curNum = numPerT + (i<numExtT);
-			InMemMergeSortOpts curOpt = {curNum, arrCopy + curOff, &subOpts, &reuseWait};
-			allSubSortOpts[i] = curOpt;
-			reusePool->addTask(inMemMultThreadMergeSort, &(allSubSortOpts[i]));
-			curOff += (itemSize * curNum);
-		}
-		reuseWait.waitOn(opts->numThread);
-	//set up the merge tree
-		std::vector<MultimergeNode*> horMNodes;
-		//initial buffering
-		curOff = 0;
-		for(uintptr_t i = 0; i<opts->numThread; i++){
-			uintptr_t curNum = numPerT + (i<numExtT);
-			MemoryBufferMergeNode* curMrg = new MemoryBufferMergeNode(&subOpts, mbufNumEnt, curNum, arrCopy+curOff);
-			allMNodes.push_back(curMrg);
-			horMNodes.push_back(curMrg);
-			reusePool->addTask(mergeTreeSubFun, curMrg);
-			curOff += (itemSize * curNum);
-		}
-		//merge it
-		std::vector<MultimergeNode*> nextHor;
-		while(horMNodes.size() > 1){
-			for(uintptr_t i = 0; i<horMNodes.size(); i+=2){
-				if(i+1 < horMNodes.size()){
-					MergeNodeMergeNode* curMrg = new MergeNodeMergeNode(&subOpts, mbufNumEnt, horMNodes[i], horMNodes[i+1]);
-					allMNodes.push_back(curMrg);
-					nextHor.push_back(curMrg);
-					reusePool->addTask(mergeTreeSubFun, curMrg);
+	char* tmpB = &(tmpLoad[0]);
+	uintptr_t numGet = queueSize - entQ.size();
+	uintptr_t numRB = datSrc->readBytes(tmpB, numGet);
+	if(numRB % itemSize){
+		throw std::runtime_error("File truncated.");
+	}
+	if(numRB != numGet){
+		entExhaust = 1;
+	}
+	entQ.insert(entQ.end(), tmpB, tmpB + numRB);
+}
+
+/**
+ * Performs a small mergesort in memory in a single thread..
+ * @param numEnts The entries to merge.
+ * @param inMem The data to sort.
+ * @param opts Sort options.
+ * @param tmpStore Temporary storage (same size as inMem).
+ * @return Whether the end result is in tmpStore.
+ */
+int inMemoryMergesortSmall(uintptr_t numEnts, char* inMem, SortOptions* opts, char* tmpStore){
+	uintptr_t itemSize = opts->itemSize;
+	char* curStore = inMem;
+	char* nxtStore = tmpStore;
+	uintptr_t size = 1;
+	while(size < numEnts){
+		uintptr_t curBase = 0;
+		while(curBase < numEnts){
+			char* curFromA = curStore + (curBase*itemSize);
+			char* curTo = nxtStore + (curBase*itemSize);
+			uintptr_t nxtBase = curBase + size;
+			if(nxtBase > numEnts){
+				memcpy(curTo, curFromA, (numEnts - curBase)*itemSize);
+				break;
+			}
+			char* curFromB = curStore + (nxtBase*itemSize);
+			uintptr_t finBase = std::min(nxtBase + size, numEnts);
+			uintptr_t numLeftA = nxtBase - curBase;
+			uintptr_t numLeftB = finBase - nxtBase;
+			while(numLeftA && numLeftB){
+				if(opts->compMeth(opts->useUni, curFromA, curFromB)){
+					memcpy(curTo, curFromA, itemSize);
+					curTo += itemSize;
+					curFromA += itemSize;
+					numLeftA--;
 				}
 				else{
-					nextHor.push_back(horMNodes[i]);
+					memcpy(curTo, curFromB, itemSize);
+					curTo += itemSize;
+					curFromB += itemSize;
+					numLeftB--;
 				}
 			}
-			horMNodes.clear();
-			std::swap(horMNodes, nextHor);
+			if(numLeftA){ memcpy(curTo, curFromA, numLeftA*itemSize); }
+			if(numLeftB){ memcpy(curTo, curFromB, numLeftB*itemSize); }
+			curBase = finBase;
 		}
-	//get the data
-		char* curTgt = inMem;
-		MultimergeNode* endMrg = horMNodes[0];
-		lockMutex(endMrg->mbMut);
-		while(endMrg->mergeReady || !(endMrg->mergeEnded)){
-			if(endMrg->mergeReady == 0){
-				waitCondition(endMrg->mbMut, endMrg->mbCond);
-				continue;
+		size = (size << 1);
+		char* swapSave = curStore;
+		curStore = nxtStore;
+		nxtStore = swapSave;
+	}
+	return curStore != inMem;
+}
+
+/**A uniform for sorting a range in memory.*/
+class MemoryRangeMergesortUni{
+public:
+	/**The number of entities.*/
+	uintptr_t numEnts;
+	/**The memory to sort.*/
+	char* inMem;
+	/**Options for the sort.*/
+	SortOptions* opts;
+	/**Temporary storage.*/
+	char* tmpStore;
+	/**Where teh end result was saved.*/
+	int endSaveL;
+	/**The "thread" id of this thing.*/
+	uintptr_t myID;
+};
+/**Patch function for threads.*/
+void memRangeMergesortTPFunc(void* myU){
+	MemoryRangeMergesortUni* argHelp = (MemoryRangeMergesortUni*)myU;
+	argHelp->endSaveL = inMemoryMergesortSmall(argHelp->numEnts, argHelp->inMem, argHelp->opts, argHelp->tmpStore);
+}
+
+/**
+ * Set up the data cascade.
+ * @param allMerge The nodes to run down.
+ * @param phaseSize THe size of each phase of the topological sort.
+ * @param usePool The threads to use.
+ * @param tmpStore Storage for thread IDs.
+ */
+void mergesortCascadeFill(std::vector<MultimergeNode*>* allMerge, std::vector<uintptr_t>* phaseSize, ThreadPool* usePool, std::vector<uintptr_t>* tmpStore){
+	uintptr_t mn0 = 0;
+	for(uintptr_t pi = 0; pi<phaseSize->size(); pi++){
+		uintptr_t psize = (*phaseSize)[pi];
+		tmpStore->clear();
+		for(uintptr_t ni = 0; ni < psize; ni++){
+			MultimergeNode* curNode = (*allMerge)[mn0];
+			if(!(curNode->entExhaust) && (curNode->entQ.size() != curNode->queueSize)){
+				tmpStore->push_back(usePool->addTask(mergeSortFillMergeNode, curNode));
 			}
-			while(endMrg->mergeReady){
-				char* fromTgt = endMrg->mergeBuffer + itemSize*endMrg->mergeOffset;
-				memcpy(curTgt, fromTgt, itemSize);
-				curTgt += itemSize;
-				endMrg->mergeReady--;
-				endMrg->mergeOffset = (endMrg->mergeOffset+1) % endMrg->mergeSize;
-			}
-			signalCondition(endMrg->mbMut, endMrg->mbCond);
+			mn0++;
 		}
-		unlockMutex(endMrg->mbMut);
-	//done, kill the things
-		free(arrCopy);
-		for(uintptr_t i = 0; i<allMNodes.size(); i++){
-			delete(allMNodes[i]); //safe, but cutting it VERY close
+		for(uintptr_t ti = 0; ti<tmpStore->size(); ti++){
+			usePool->joinTask((*tmpStore)[ti]);
 		}
+	}
 }
 
 void inMemoryMergesort(uintptr_t numEnts, char* inMem, SortOptions* opts){
 	uintptr_t itemSize = opts->itemSize;
-	if(opts->numThread > 1){
-		ThreadPool reusePool(2 * opts->numThread);
-		inMemoryMergesortPool(numEnts, inMem, opts, &reusePool);
+	std::vector<char> tmpSave; tmpSave.resize(itemSize*numEnts + 1);
+	if(opts->numThread == 1){
+		if(inMemoryMergesortSmall(numEnts, inMem, opts, &(tmpSave[0]))){
+			memcpy(inMem, &(tmpSave[0]), numEnts*itemSize);
+		}
 	}
 	else{
-		//figure out how much space to allocate
-		uintptr_t needMalEnt = 0;
-		uintptr_t curME = numEnts;
-		while(curME > 1){
-			needMalEnt += curME;
-			uintptr_t splA = curME / 2;
-			uintptr_t splB = curME - splA;
-			curME = (splA > splB) ? splA : splB;
-		}
-		//allocate it
-		char* allocPoot = (char*)malloc(needMalEnt*itemSize);
-		//do the actual sort
-		inMemoryMergesortPreA(numEnts, inMem, opts, allocPoot);
+		//make a pool if needbe
+			int killPool = 0;
+			ThreadPool* usePool = opts->usePool;
+			if(usePool == 0){
+				killPool = 1;
+				usePool = new ThreadPool(opts->numThread);
+			}
+		//split it amongst threads, sort each piece
+			std::vector<MemoryRangeMergesortUni> initSUs;
+			initSUs.resize(opts->numThread);
+			uintptr_t numPerT = numEnts / opts->numThread;
+			uintptr_t numExtT = numEnts % opts->numThread;
+			uintptr_t curT0 = 0;
+			for(uintptr_t i = 0; i<opts->numThread; i++){
+				MemoryRangeMergesortUni* curU = &(initSUs[i]);
+				curU->numEnts = numPerT + (i<numExtT);
+				curU->inMem = inMem + (curT0*itemSize);
+				curU->opts = opts;
+				curU->tmpStore = &(tmpSave[curT0*itemSize]);
+				curT0 += curU->numEnts;
+				curU->myID = usePool->addTask(memRangeMergesortTPFunc, curU);
+			}
+		//put everything in the temporary storage
+			for(uintptr_t i = 0; i<opts->numThread; i++){
+				usePool->joinTask(initSUs[i].myID);
+				MemoryRangeMergesortUni* curU = &(initSUs[i]);
+				if(curU->endSaveL == 0){
+					memcpymt(curU->tmpStore, curU->inMem, curU->numEnts*itemSize, opts->numThread, usePool);
+				}
+			}
+		//set up the bulk merge
+			uintptr_t buffSize = 4096 * itemSize;
+			//initial memory
+			std::vector<MultimergeNode*> allMerge;
+			for(uintptr_t i = 0; i<opts->numThread; i++){
+				MemoryRangeMergesortUni* curU = &(initSUs[i]);
+				allMerge.push_back(new MemoryBufferMergeNode(opts, buffSize, curU->numEnts, curU->tmpStore));
+			}
+			std::vector<uintptr_t> phaseSize;
+				phaseSize.push_back(opts->numThread);
+			std::vector<MultimergeNode*> curHor;
+				curHor.insert(curHor.end(), allMerge.begin(), allMerge.end());
+			//build up the merge between nodes
+			std::vector<MultimergeNode*> nxtHor;
+			while(curHor.size() > 1){
+				uintptr_t i = 0;
+				uintptr_t curPS = 0;
+				while(i < curHor.size()){
+					MultimergeNode* nodA = curHor[i];
+					i++;
+					if(i >= curHor.size()){
+						nxtHor.push_back(nodA);
+					}
+					else{
+						MultimergeNode* nodB = curHor[i];
+						MultimergeNode* mrgNod = new MergeNodeMergeNode(opts, buffSize, nodA, nodB);
+						allMerge.push_back(mrgNod);
+						nxtHor.push_back(mrgNod);
+						i++;
+						curPS++;
+					}
+				}
+				phaseSize.push_back(curPS);
+				curHor.clear();
+				std::swap(curHor, nxtHor);
+			}
+		//mergeit
+			std::vector<uintptr_t> threadIDTmp;
+			MultimergeNode* endNod = curHor[0];
+			char* curDump = inMem;
+			while(!(endNod->entExhaust) || endNod->entQ.size()){
+				std::copy(endNod->entQ.begin(), endNod->entQ.end(), curDump);
+				curDump += endNod->entQ.size();
+				endNod->entQ.clear();
+				mergesortCascadeFill(&allMerge, &phaseSize, usePool, &threadIDTmp);
+			}
 		//clean up
-		free(allocPoot);
+			if(killPool){ delete(usePool); }
+			for(uintptr_t i = 0; i<allMerge.size(); i++){ delete(allMerge[i]); }
 	}
 }
 
 void outOfMemoryMergesort(InStream* startF, const char* tempFolderName, OutStream* outF, SortOptions* opts){
-	//common storage and crap
-		char numBuff[4*sizeof(uintmax_t)+4];
+	//common storage
 		uintptr_t itemSize = opts->itemSize;
 		uintptr_t maxLoadEnt = opts->maxLoad / itemSize;
-		if(maxLoadEnt < 2){ maxLoadEnt = 2; }
-		ThreadPool reusePool(std::max((uintptr_t)3, 2 * opts->numThread));
-	//sort in chunks, each chunk to its own file
-		const char* curStoreNP = "sortsplA";
+			maxLoadEnt = maxLoadEnt / 2;
+			if(maxLoadEnt < 2){ maxLoadEnt = 2; }
+		uintptr_t buffSize = 4096 * itemSize;
+		std::vector<char> tempFileName;
+			tempFileName.insert(tempFileName.end(), tempFolderName, tempFolderName + strlen(tempFolderName));
+			tempFileName.insert(tempFileName.end(), pathElementSep, pathElementSep + strlen(pathElementSep));
+			uintptr_t fnameBuffI0 = tempFileName.size();
+			tempFileName.resize(fnameBuffI0 + 10+4*sizeof(uintmax_t)+4);
+		char* fnameBuff = &(tempFileName[fnameBuffI0]);
+		char* fpathBuff = &(tempFileName[0]);
+	//make a pool if needbe
+		int killPool = 0;
+		ThreadPool* usePool = opts->usePool;
+		if(usePool == 0){
+			killPool = 1;
+			usePool = new ThreadPool(opts->numThread);
+		}
+	//sort in chunks
+		SortOptions subOpts = *opts;
+			subOpts.usePool = usePool;
+		uintptr_t numOutBase = 0;
 		uintptr_t numOutFiles = 0;
 		char* inMemSortArena = (char*)malloc(itemSize*maxLoadEnt);
 		while(true){
@@ -448,130 +438,106 @@ void outOfMemoryMergesort(InStream* startF, const char* tempFolderName, OutStrea
 			uintptr_t numLoadEnt = numRead / itemSize;
 			if(numLoadEnt == 0){ break; }
 			//sort
-			if(opts->numThread > 1){
-				inMemoryMergesortPool(numLoadEnt, inMemSortArena, opts, &reusePool);
-			}
-			else{
-				inMemoryMergesort(numLoadEnt, inMemSortArena, opts);
-			}
+			inMemoryMergesort(numLoadEnt, inMemSortArena, &subOpts);
 			//dump to new file
-			sprintf(numBuff, "%ju", numOutFiles);
-			std::string newFNam = tempFolderName;
-			newFNam.append(pathElementSep);
-			newFNam.append(curStoreNP);
-			newFNam.append(numBuff);
-			GZipOutStream curDumpOut(0, newFNam.c_str());
+			sprintf(fnameBuff, "%s%ju", "sortspl_", (uintmax_t)numOutFiles);
+			MultithreadGZipOutStream curDumpOut(0, fpathBuff, opts->numThread, usePool);
 			curDumpOut.writeBytes(inMemSortArena, numRead);
 			numOutFiles++;
 		}
 		free(inMemSortArena);
-	//merge until within thread count
-		uintptr_t mrgThreadC = std::max((uintptr_t)2, opts->numThread);
-		uintptr_t mrgBufferSize = std::max((uintptr_t)2, maxLoadEnt / (2*mrgThreadC));
-		const char* nxtStoreNP = "sortsplB";
-		while(true){
-			uintptr_t numMrgFiles = 0;
-			uintptr_t lti = 0;
-			while(lti < numOutFiles){
-				uintptr_t hti = std::min(lti+mrgThreadC, numOutFiles);
-				//set up the initial reads
-				std::vector<InStream*> saveInStr;
-				std::vector<MultimergeNode*> allMNodes;
-				std::vector<MultimergeNode*> horMNodes;
-				for(uintptr_t i = lti; i < hti; i++){
-					sprintf(numBuff, "%ju", i);
-					std::string srcFNam = tempFolderName;
-					srcFNam.append(pathElementSep);
-					srcFNam.append(curStoreNP);
-					srcFNam.append(numBuff);
-					InStream* curSrcS = new GZipInStream(srcFNam.c_str());
-					MultimergeNode* curMrg = new FileSourceMergeNode(opts, mrgBufferSize, curSrcS);
-					saveInStr.push_back(curSrcS);
-					allMNodes.push_back(curMrg);
-					horMNodes.push_back(curMrg);
-					reusePool.addTask(mergeTreeSubFun, curMrg);
+	//merge
+		uintptr_t mergeThread = std::max(opts->numThread, (uintptr_t)64);
+		while(numOutBase != numOutFiles){
+			int lastLine = (numOutFiles - numOutBase) < mergeThread;
+			uintptr_t nxtOutBase = numOutFiles;
+			uintptr_t nxtOutFiles = numOutFiles;
+			uintptr_t baseI = numOutBase;
+			while(baseI < numOutFiles){
+				uintptr_t nextI = std::min(baseI + mergeThread, numOutFiles);
+				//open up the current crop of files
+				std::vector<InStream*> saveFiles;
+				std::vector<MultimergeNode*> allMerge;
+				for(uintptr_t i = baseI; i<nextI; i++){
+					sprintf(fnameBuff, "%s%ju", "sortspl_", (uintmax_t)i);
+					InStream* curSrcS = new GZipInStream(fpathBuff);
+					MultimergeNode* curMrg = new FileSourceMergeNode(opts, buffSize, curSrcS);
+					saveFiles.push_back(curSrcS);
+					allMerge.push_back(curMrg);
 				}
-				//merge those reads
-				std::vector<MultimergeNode*> nextHor;
-				while(horMNodes.size() > 1){
-					for(uintptr_t i = 0; i<horMNodes.size(); i+=2){
-						if(i+1 < horMNodes.size()){
-							MultimergeNode* curMrg = new MergeNodeMergeNode(opts, mrgBufferSize, horMNodes[i], horMNodes[i+1]);
-							allMNodes.push_back(curMrg);
-							nextHor.push_back(curMrg);
-							reusePool.addTask(mergeTreeSubFun, curMrg);
+				std::vector<uintptr_t> phaseSize;
+					phaseSize.push_back(allMerge.size());
+				std::vector<MultimergeNode*> curHor;
+					curHor.insert(curHor.end(), allMerge.begin(), allMerge.end());
+				//build up the merge between nodes
+				std::vector<MultimergeNode*> nxtHor;
+				while(curHor.size() > 1){
+					uintptr_t i = 0;
+					uintptr_t curPS = 0;
+					while(i < curHor.size()){
+						MultimergeNode* nodA = curHor[i];
+						i++;
+						if(i >= curHor.size()){
+							nxtHor.push_back(nodA);
 						}
 						else{
-							nextHor.push_back(horMNodes[i]);
+							MultimergeNode* nodB = curHor[i];
+							MultimergeNode* mrgNod = new MergeNodeMergeNode(opts, buffSize, nodA, nodB);
+							allMerge.push_back(mrgNod);
+							nxtHor.push_back(mrgNod);
+							i++;
+							curPS++;
 						}
 					}
-					horMNodes.clear();
-					std::swap(horMNodes, nextHor);
+					phaseSize.push_back(curPS);
+					curHor.clear();
+					std::swap(curHor, nxtHor);
 				}
-				//open up the output
-				OutStream* curOutF;
-				if(numOutFiles <= mrgThreadC){
-					curOutF = outF;
+				//figure out where to output
+				int killOut;
+				OutStream* curOut;
+				if(lastLine){
+					killOut = 0;
+					curOut = outF;
 				}
 				else{
-					sprintf(numBuff, "%ju", numMrgFiles);
-					std::string dstFNam = tempFolderName;
-					dstFNam.append(pathElementSep);
-					dstFNam.append(nxtStoreNP);
-					dstFNam.append(numBuff);
-					curOutF = new GZipOutStream(0, dstFNam.c_str());
+					killOut = 1;
+					sprintf(fnameBuff, "%s%ju", "sortspl_", (uintmax_t)nxtOutFiles);
+					curOut = new MultithreadGZipOutStream(0, fpathBuff, opts->numThread, usePool);
+					nxtOutFiles++;
 				}
-				//dump
-				MultimergeNode* endMrg = horMNodes[0];
-				lockMutex(endMrg->mbMut);
-				while(endMrg->mergeReady || !(endMrg->mergeEnded)){
-					if(endMrg->mergeReady == 0){
-						waitCondition(endMrg->mbMut, endMrg->mbCond);
-						continue;
+				//output
+				std::vector<uintptr_t> threadIDTmp;
+				MultimergeNode* endNod = curHor[0];
+				std::vector<char> tmpDump;
+				while(!(endNod->entExhaust) || endNod->entQ.size()){
+					if(endNod->entQ.size()){
+						tmpDump.insert(tmpDump.end(), endNod->entQ.begin(), endNod->entQ.end());
+						curOut->writeBytes(&(tmpDump[0]), tmpDump.size());
+						endNod->entQ.clear();
+						tmpDump.clear();
 					}
-					while(endMrg->mergeReady){
-						char* fromTgt = endMrg->mergeBuffer + itemSize*endMrg->mergeOffset;
-						curOutF->writeBytes(fromTgt, itemSize);
-						endMrg->mergeReady--;
-						endMrg->mergeOffset = (endMrg->mergeOffset+1) % endMrg->mergeSize;
-					}
-					signalCondition(endMrg->mbMut, endMrg->mbCond);
+					mergesortCascadeFill(&allMerge, &phaseSize, usePool, &threadIDTmp);
 				}
-				unlockMutex(endMrg->mbMut);
-				//clean up
-				for(uintptr_t i = 0; i<allMNodes.size(); i++){
-					//TODO safe?
-					delete(allMNodes[i]);
-				}
-				for(uintptr_t i = 0; i<saveInStr.size(); i++){
-					delete(saveInStr[i]);
-				}
-				if(curOutF != outF){ delete(curOutF); }
-				lti = hti;
-				numMrgFiles++;
+				//clean up and prepare for the next round
+				if(killOut){ delete(curOut); }
+				for(uintptr_t i = 0; i<allMerge.size(); i++){ delete(allMerge[i]); }
+				for(uintptr_t i = 0; i<saveFiles.size(); i++){ delete(saveFiles[i]); }
+				baseI = nextI;
 			}
-			//kill the old files
-			for(uintptr_t i = 0; i<numOutFiles; i++){
-				sprintf(numBuff, "%ju", i);
-				std::string srcFNam = tempFolderName;
-				srcFNam.append(pathElementSep);
-				srcFNam.append(curStoreNP);
-				srcFNam.append(numBuff);
-				killFile(srcFNam.c_str());
+			//kill the old files and prepare for the next round
+			for(uintptr_t i = numOutBase; i<numOutFiles; i++){
+				sprintf(fnameBuff, "%s%ju", "sortspl_", (uintmax_t)i);
+				killFile(fpathBuff);
 			}
-			//stop if all done
-			if(numOutFiles <= mrgThreadC){
-				break;
-			}
-			//prepare for the next round
-			numOutFiles = numMrgFiles;
-			const char* tmpPref = curStoreNP;
-			curStoreNP = nxtStoreNP;
-			nxtStoreNP = tmpPref;
+			numOutBase = nxtOutBase;
+			numOutFiles = nxtOutFiles;
 		}
+	//clean up
+		if(killPool){ delete(usePool); }
 }
 
-PreSortMultithreadPipe::PreSortMultithreadPipe(uintptr_t numSave) : drainCon(&drainMut){
+PreSortMultithreadPipe::PreSortMultithreadPipe(uintptr_t numSave) : drainCon(&drainMut), fillCon(&drainMut){
 	maxBuff = numSave;
 	endWrite = false;
 }
@@ -582,14 +548,16 @@ void PreSortMultithreadPipe::writeBytes(const char* toW, uintptr_t numW){
 	
 	writeMut.lock();
 	drainMut.lock();
-		if(endWrite){ throw std::runtime_error("Cannot write to closed pipe."); }
 		while(numLeft){
-			while(datBuff.size() >= maxBuff){ drainCon.wait(); }
+			while(datBuff.size() >= maxBuff){
+				if(endWrite){ drainMut.unlock(); writeMut.unlock(); throw std::runtime_error("Cannot write to closed pipe."); }
+				drainCon.wait();
+			}
 			uintptr_t numAdd = maxBuff - datBuff.size(); numAdd = std::min(numAdd, numLeft);
 			datBuff.insert(datBuff.end(), curFoc, curFoc+numAdd);
 			curFoc += numAdd;
 			numLeft -= numAdd;
-			drainCon.signal();
+			fillCon.signal();
 		}
 	drainMut.unlock();
 	writeMut.unlock();
@@ -600,6 +568,7 @@ void PreSortMultithreadPipe::closeWrite(){
 	drainMut.lock();
 		endWrite = true;
 		drainCon.broadcast();
+		fillCon.broadcast();
 	drainMut.unlock();
 	writeMut.unlock();
 }
@@ -607,11 +576,12 @@ void PreSortMultithreadPipe::closeWrite(){
 int PreSortMultithreadPipe::readByte(){
 	int toRet = -1;
 	drainMut.lock();
-		while(!endWrite && (datBuff.size()==0)){ drainCon.wait(); }
+		while(!endWrite && (datBuff.size()==0)){ fillCon.wait(); }
 		if(datBuff.size()){
 			toRet = datBuff[0];
 			datBuff.pop_front();
 		}
+		drainCon.signal();
 	drainMut.unlock();
 	return toRet;
 }
@@ -623,7 +593,7 @@ uintptr_t PreSortMultithreadPipe::readBytes(char* toR, uintptr_t numR){
 	
 	drainMut.lock();
 		while(numLeft){
-			while(!endWrite && (datBuff.size()==0)){ drainCon.wait(); }
+			while(!endWrite && (datBuff.size()==0)){ fillCon.wait(); }
 			if(datBuff.size()){
 				uintptr_t numCpy = std::min(numLeft, datBuff.size());
 				std::copy(datBuff.begin(), datBuff.begin() + numCpy, curFoc);
@@ -641,4 +611,39 @@ uintptr_t PreSortMultithreadPipe::readBytes(char* toR, uintptr_t numR){
 	return totRead;
 }
 
+char* whodunSortLowerBound(uintptr_t numEnts, char* inMem, char* lookFor, SortOptions* opts){
+	uintptr_t itemSize = opts->itemSize;
+	char* first = inMem;
+	uintptr_t count = numEnts;
+	while(count){
+		uintptr_t step = count / 2;
+		char* it = first + (step * itemSize);
+		if(opts->compMeth(opts->useUni, it, lookFor)){
+			first = it + itemSize;
+			count = count - (step + 1);
+		}
+		else{
+			count = step;
+		}
+	}
+	return first;
+}
+
+char* whodunSortUpperBound(uintptr_t numEnts, char* inMem, char* lookFor, SortOptions* opts){
+	uintptr_t itemSize = opts->itemSize;
+	char* first = inMem;
+	uintptr_t count = numEnts;
+	while(count){
+		uintptr_t step = count / 2;
+		char* it = first + (step * itemSize);
+		if(!(opts->compMeth(opts->useUni, lookFor, it))){
+			first = it + itemSize;
+			count = count - (step + 1);
+		}
+		else{
+			count = step;
+		}
+	}
+	return first;
+}
 

@@ -1,5 +1,6 @@
 #include "whodun_compress.h"
 
+#include <string>
 #include <stdlib.h>
 #include <stdexcept>
 #include <algorithm>
@@ -13,9 +14,10 @@ BlockCompOutStream::BlockCompOutStream(int append, uintptr_t blockSize, const ch
 	chunkSize = blockSize;
 	myComp = compMeth;
 	myComp->theData.clear();
+	myComp->compData.clear();
 	if(append && fileExists(annotFN)){
 		intptr_t annotLen = getFileSize(annotFN);
-		if(annotLen < 0){throw std::runtime_error("Problem examining annotation file.");}
+		if(annotLen < 0){std::string errMess("Problem examining annotation file "); errMess.append(annotFN); throw std::runtime_error(errMess);}
 		if(annotLen % BLOCKCOMP_ANNOT_ENTLEN){throw std::runtime_error("Malformed annotation file.");}
 		FILE* annotTmp = fopen(annotFN, "rb");
 		if(annotTmp == 0){throw std::runtime_error("Problem opening annotation file.");}
@@ -65,6 +67,12 @@ BlockCompOutStream::~BlockCompOutStream(){
 	fclose(annotF);
 }
 
+void BlockCompOutStream::flush(){
+	if(myComp->theData.size()){
+		dumpCompData();
+	}
+}
+
 void BlockCompOutStream::writeByte(int toW){
 	myComp->theData.push_back(toW);
 	if(myComp->theData.size() > chunkSize){
@@ -111,9 +119,10 @@ void BlockCompOutStream::dumpCompData(){
 BlockCompInStream::BlockCompInStream(const char* mainFN, const char* annotFN, CompressionMethod* compMeth){
 	myComp = compMeth;
 	intptr_t numBlocksT = getFileSize(annotFN);
-	if(numBlocksT < 0){throw std::runtime_error("Problem examining annotation file.");}
+	if(numBlocksT < 0){std::string errMess("Problem examining annotation file "); errMess.append(annotFN); throw std::runtime_error(errMess);}
 	numBlocks = numBlocksT / BLOCKCOMP_ANNOT_ENTLEN;
 	numLastLine = 0;
+	lastLineBI0 = 0;
 	mainF = fopen(mainFN, "rb");
 	if(mainF == 0){
 		throw std::runtime_error("Problem opening main block file.");
@@ -125,6 +134,7 @@ BlockCompInStream::BlockCompInStream(const char* mainFN, const char* annotFN, Co
 	}
 	nextReadI = 0;
 	myComp->theData.clear();
+	myComp->compData.clear();
 	lastLineBuff = (char*)malloc(BLOCKCOMP_ANNOT_ENTLEN*BLOCKCOMPIN_LASTLINESEEK);
 	lastLineAddrs = (uintptr_t*)malloc(sizeof(uintptr_t)*BLOCKCOMP_ANNOT_ENTLEN*BLOCKCOMPIN_LASTLINESEEK);
 }
@@ -205,6 +215,7 @@ void BlockCompInStream::seek(uintptr_t toAddr){
 		if(fread(&(myComp->compData[0]), 1, blockCLen, mainF) != blockCLen){throw std::runtime_error("Problem reading data.");}
 		myComp->decompressData();
 		nextReadI = toAddr - focLI;
+		if(fseekPointer(annotF, BLOCKCOMP_ANNOT_ENTLEN*(lastLineBI0 + winBI + 1), SEEK_SET)){throw std::runtime_error("Problem seeking annotation file.");}
 		return;
 	}
 	arenaNotCached:
@@ -226,6 +237,7 @@ void BlockCompInStream::seek(uintptr_t toAddr){
 	}
 	uintptr_t numRBlock = toBlock - fromBlock;
 	numLastLine = numRBlock;
+	lastLineBI0 = fromBlock;
 	if(fseekPointer(annotF, BLOCKCOMP_ANNOT_ENTLEN*fromBlock, SEEK_SET)){throw std::runtime_error("Problem seeking annotation file.");}
 	if(fread(lastLineBuff, 1, numRBlock*BLOCKCOMP_ANNOT_ENTLEN, annotF) != (numRBlock*BLOCKCOMP_ANNOT_ENTLEN)){throw std::runtime_error("Problem reading data.");}
 	for(uintptr_t i = 0; i<numRBlock; i++){
@@ -264,7 +276,7 @@ void GZipOutStream::writeByte(int toW){
 	}
 }
 void GZipOutStream::writeBytes(const char* toW, uintptr_t numW){
-	if(gzfwrite(toW, 1, numW, baseFile)!=numW){
+	if(gzwrite(baseFile, toW, numW)!=((int)numW)){
 		throw std::runtime_error("Problem writing file " + myName);
 	}
 }
@@ -295,19 +307,147 @@ int GZipInStream::readByte(){
 	return toR;
 }
 uintptr_t GZipInStream::readBytes(char* toR, uintptr_t numR){
-	uintptr_t toRet = gzfread(toR, 1, numR, baseFile);
-	if(toRet != numR){
+	int toRet = gzread(baseFile, toR, numR);
+	if(toRet < 0){
 		int gzerrcode;
 		const char* errMess = gzerror(baseFile, &gzerrcode);
-		if(gzerrcode && (gzerrcode != Z_STREAM_END)){
-			std::string errRep = "Problem reading file ";
-				errRep.append(myName);
-				errRep.append(" : ");
-				errRep.append(errMess);
-			throw std::runtime_error(errRep);
-		}
+		std::string errRep = "Problem reading file ";
+			errRep.append(myName);
+			errRep.append(" : ");
+			errRep.append(errMess);
+		throw std::runtime_error(errRep);
 	}
 	return toRet;
+}
+
+/**The uniform used by threads.*/
+class MultithreadGZipOutStreamUniform{
+public:
+	/**Basic setup.*/
+	MultithreadGZipOutStreamUniform();
+	/**Basic teardown.*/
+	~MultithreadGZipOutStreamUniform();
+	/**If it has, the ID to wait on.*/
+	uintptr_t threadID;
+	/**The data to compress.*/
+	std::vector<char> toCompress;
+	/**The place to put the compressed bytes.*/
+	std::vector<char> compressTo;
+	/**Compression stream*/
+	z_stream zs;
+};
+
+/**Compress a thing.*/
+void multithreadGZipOutThreadFunc(void* theUni){
+	MultithreadGZipOutStreamUniform* myU = (MultithreadGZipOutStreamUniform*)theUni;
+	std::vector<char>* toFill = &(myU->compressTo);
+	uintptr_t compLen = myU->toCompress.size();
+	toFill->resize(std::max((uintptr_t)64, 2*compLen));
+	z_stream* zs = &(myU->zs);
+	zs->avail_in = compLen;
+	zs->next_in = (Bytef*)(compLen ? &(myU->toCompress[0]) : 0);
+	zs->avail_out = toFill->size();
+	zs->next_out = (Bytef*)&((*toFill)[0]);
+	deflateInit2(zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+	deflate(zs, Z_FINISH);
+	deflateEnd(zs);
+	toFill->resize(zs->total_out);
+}
+
+MultithreadGZipOutStreamUniform::MultithreadGZipOutStreamUniform(){
+	zs.zalloc = Z_NULL;
+	zs.zfree = Z_NULL;
+	zs.opaque = Z_NULL;
+}
+
+MultithreadGZipOutStreamUniform::~MultithreadGZipOutStreamUniform(){
+}
+
+#define MTGZIP_BYTES_PER_THREAD 65536
+
+#define MTGZIP_COMMON_SETUP \
+	numThread = numThreads;\
+	myName = fileName;\
+	if(append){\
+		baseFile = fopen(fileName, "ab");\
+	}\
+	else{\
+		baseFile = fopen(fileName, "wb");\
+	}\
+	if(baseFile == 0){\
+		throw std::runtime_error("Could not open file " + myName);\
+	}\
+	threadUnis.resize(numThread);\
+	nextTUni = 0;\
+	nextOUni = 0;
+
+MultithreadGZipOutStream::MultithreadGZipOutStream(int append, const char* fileName, int numThreads){
+	MTGZIP_COMMON_SETUP
+	compThreads = new ThreadPool(numThreads);
+	killPool = true;
+}
+
+MultithreadGZipOutStream::MultithreadGZipOutStream(int append, const char* fileName, int numThreads, ThreadPool* useThreads){
+	MTGZIP_COMMON_SETUP
+	compThreads = useThreads;
+	killPool = false;
+}
+
+MultithreadGZipOutStream::~MultithreadGZipOutStream(){
+	if(threadUnis[nextTUni].toCompress.size()){
+		startCompressing();
+	}
+	while(nextOUni != nextTUni){
+		startDumping();
+	}
+	fclose(baseFile);
+	if(killPool){ delete(compThreads); }
+}
+
+void MultithreadGZipOutStream::writeByte(int toW){
+	MultithreadGZipOutStreamUniform* curUni = &(threadUnis[nextTUni]);
+	curUni->toCompress.push_back(toW);
+	if(curUni->toCompress.size() >= MTGZIP_BYTES_PER_THREAD){
+		startCompressing();
+	}
+}
+
+void MultithreadGZipOutStream::writeBytes(const char* toW, uintptr_t numW){
+	const char* leftW = toW;
+	uintptr_t leftN = numW;
+	while(leftN){
+		MultithreadGZipOutStreamUniform* curUni = &(threadUnis[nextTUni]);
+		uintptr_t numPosAdd = MTGZIP_BYTES_PER_THREAD - curUni->toCompress.size();
+		if(numPosAdd > leftN){ numPosAdd = leftN; }
+		curUni->toCompress.insert(curUni->toCompress.end(), leftW, leftW + numPosAdd);
+		if(curUni->toCompress.size() >= MTGZIP_BYTES_PER_THREAD){
+			startCompressing();
+		}
+		leftW += numPosAdd;
+		leftN -= numPosAdd;
+	}
+}
+
+void MultithreadGZipOutStream::startCompressing(){
+	MultithreadGZipOutStreamUniform* curUni = &(threadUnis[nextTUni]);
+	curUni->threadID = compThreads->addTask(multithreadGZipOutThreadFunc, curUni);
+	nextTUni = (nextTUni + 1) % numThread;
+	if(nextTUni == nextOUni){
+		startDumping();
+	}
+}
+
+void MultithreadGZipOutStream::startDumping(){
+	MultithreadGZipOutStreamUniform* curUni = &(threadUnis[nextOUni]);
+	compThreads->joinTask(curUni->threadID);
+	if(curUni->compressTo.size()){
+		uintptr_t numW = fwrite(&(curUni->compressTo[0]), 1, curUni->compressTo.size(), baseFile);
+		if(numW != curUni->compressTo.size()){
+			throw std::runtime_error("Problem writing compressed data.");
+		}
+	}
+	curUni->toCompress.clear();
+	nextOUni = (nextOUni + 1) % numThread;
 }
 
 RawCompressionMethod::~RawCompressionMethod(){}

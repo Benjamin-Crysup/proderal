@@ -37,4 +37,12 @@ public:
  */
 double logGamma(double forVal);
 
+/**
+ * Calculate the log gamma function to some level of precision.
+ * @param forVal The value to calculate for.
+ * @param useEpsilon The precision.
+ * @return The calculated value.
+ */
+double logGammaT(double forVal, double useEpsilon);
+
 #endif

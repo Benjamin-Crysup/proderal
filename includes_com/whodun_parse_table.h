@@ -94,7 +94,7 @@ public:
 	/**The next index to report.*/
 	uintptr_t focusInd;
 	/**The number of entries in the file.*/
-	uintptr_t numEntries;
+	uintptr_t rowCount;
 	/**The actual thing to read.*/
 	BlockCompInStream* theStr;
 	/**The index file.*/

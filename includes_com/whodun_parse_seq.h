@@ -227,8 +227,6 @@ public:
 	std::vector<unsigned char> tmpQualS;
 };
 
-//TODO random access sequence
-
 /**
  * Open a named sam/bam/cram file for reading.
  * @param fileName The name of the file to open: "-" for stdin.

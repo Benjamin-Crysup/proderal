@@ -54,25 +54,38 @@ double ProbabilitySummation::getFinalLogSum(){
 
 #define EULERMASCHERONI 0.5772156649015328606065120900824024310421
 
-double logGamma(double forVal){
-	if(forVal <= 0.0){
-		return 0.0 / 0.0;
-	}
-	double fullTot = - EULERMASCHERONI * forVal;
-	fullTot -= log(forVal);
-	uintptr_t curK = 1;
-	while(true){
-		double curAdd = forVal/curK - log(1.0 + forVal/curK);
-		if(fabs(fullTot) > DBL_EPSILON){
-			if(fabs(curAdd/fullTot) < DBL_EPSILON){
+double logGammaT(double forVal, double useEpsilon){
+	#ifdef LGAMMA_FALLBACK
+		if(forVal <= 0.0){
+			return 1.0 / 0.0;
+		}
+		double fullTot = - EULERMASCHERONI * forVal;
+		fullTot -= log(forVal);
+		uintptr_t curK = 1;
+		while(true){
+			double curAdd = forVal/curK - log(1.0 + forVal/curK);
+			if(fabs(fullTot) > useEpsilon){
+				if(fabs(curAdd/fullTot) < useEpsilon){
+					break;
+				}
+			}
+			else if(fabs(curAdd) < useEpsilon){
 				break;
 			}
+			fullTot += curAdd;
+			curK++;
 		}
-		else if(fabs(curAdd) < DBL_EPSILON){
-			break;
-		}
-		fullTot += curAdd;
-	}
-	return fullTot;
+		return fullTot;
+	#else
+		return lgamma(forVal);
+	#endif
+}
+
+double logGamma(double forVal){
+	#ifdef LGAMMA_FALLBACK
+		return logGammaT(forVal, DBL_EPSILON);
+	#else
+		return lgamma(forVal);
+	#endif
 }
 

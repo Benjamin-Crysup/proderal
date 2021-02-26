@@ -1,12 +1,24 @@
 #ifndef WHODUN_THREAD_H
 #define WHODUN_THREAD_H 1
 
+#include <set>
+#include <map>
 #include <deque>
 #include <vector>
 #include <stdint.h>
 
 #include "whodun_cache.h"
 #include "whodun_oshook.h"
+
+/**Internal storage for a task.*/
+typedef struct{
+	/**The ID of the task.*/
+	uintptr_t taskID;
+	/**The function for the task.*/
+	void(*taskFun)(void*);
+	/**The uniform for the task.*/
+	void* taskUni;
+} ThreadPoolTaskInfo;
 
 /**A pool of reusable threads.*/
 class ThreadPool{
@@ -22,42 +34,36 @@ public:
 	 * Add a task to run.
 	 * @param toDo The function to run.
 	 * @param toPass The thing to add.
+	 * @return The ID of the task. Will need to join at some point.
 	 */
-	void addTask(void (*toDo)(void*), void* toPass);
+	uintptr_t addTask(void (*toDo)(void*), void* toPass);
+	/**
+	 * Wait for a task to finish.
+	 * @param taskID The ID of the task.
+	 */
+	void joinTask(uintptr_t taskID);
 	/**The number of threads in this pool.*/
 	int numThr;
 	/**The task mutex.*/
 	void* taskMut;
 	/**The task conditions.*/
 	void* taskCond;
-	/**The wating tasks.*/
-	std::deque< std::pair<void(*)(void*), void*> > waitTask;
+	/**The ID to use for the next job.*/
+	uintptr_t nextID;
+	/**The tasks waiting to be run.*/
+	std::deque<ThreadPoolTaskInfo> waitTask;
+	/**The IDs of the running/waiting tasks.*/
+	std::set<uintptr_t> hotTasks;
+	/**The IDs of the finished tasks.*/
+	std::set<uintptr_t> doneTasks;
+	/**Condition variables for things actively waiting on jobs.*/
+	std::map<uintptr_t,void*> doneCondMap;
+	/**Avoid allocating many conditions.*/
+	std::vector<void*> saveConds;
 	/**Whether the pool is live.*/
 	bool poolLive;
 	/**The live threads.*/
 	std::vector<void*> liveThread;
-};
-
-/**Wait for multiple.*/
-class ThreadMultiWait{
-public:
-	/**Set up the base.*/
-	ThreadMultiWait();
-	/**Tear down.*/
-	~ThreadMultiWait();
-	/**
-	 * Add to the amount to wait and wait until zero.
-	 * @param numWait The number of things to wait on.
-	 */
-	void waitOn(unsigned numWait);
-	/**Call when something being waited on finishes.*/
-	void unwaitOne();
-	/**The mutex for this thing.*/
-	void* myMut;
-	/**The condition to wait on for this thing.*/
-	void* myCond;
-	/**The number still in the air.*/
-	int curWait;
 };
 
 /**Allocate containers in a threadsafe, reusable manner.*/

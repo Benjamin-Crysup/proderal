@@ -215,7 +215,7 @@ BCompTabularReader::BCompTabularReader(BlockCompInStream* toFlit, const char* in
 	intptr_t annotLen = getFileSize(indFName);
 	if(annotLen < 0){throw std::runtime_error("Problem examining index file.");}
 	if(annotLen % BCOMPTAB_INDEX_ENTLEN){throw std::runtime_error("Malformed index file.");}
-	numEntries = annotLen / BCOMPTAB_INDEX_ENTLEN;
+	rowCount = annotLen / BCOMPTAB_INDEX_ENTLEN;
 	indF = fopen(indFName, "rb");
 	if(indF == 0){ throw std::runtime_error("Could not open index file."); }
 }
@@ -260,13 +260,13 @@ int BCompTabularReader::readNextEntry(){
 	bool wasSeek = false;
 	if(resetInd >= 0){
 		focusInd = resetInd;
-		if(focusInd < numEntries){
+		if(focusInd < rowCount){
 			if(fseekPointer(indF, BCOMPTAB_INDEX_ENTLEN*focusInd, SEEK_SET)){ throw std::runtime_error("Problem seeking index file."); }
 			wasSeek = true;
 		}
 		resetInd = -1;
 	}
-	if(focusInd >= numEntries){
+	if(focusInd >= rowCount){
 		return 0;
 	}
 	char loadBuff[BCOMPTAB_INDEX_ENTLEN];
@@ -281,11 +281,11 @@ int BCompTabularReader::readNextEntry(){
 }
 
 uintptr_t BCompTabularReader::getNumEntries(){
-	return numEntries;
+	return rowCount;
 }
 
 void BCompTabularReader::readSpecificEntry(uintptr_t entInd){
-	if(entInd >= numEntries){ throw std::runtime_error("Bad entry index."); }
+	if(entInd >= rowCount){ throw std::runtime_error("Bad entry index."); }
 	resetInd = focusInd;
 	if(fseekPointer(indF, BCOMPTAB_INDEX_ENTLEN*entInd, SEEK_SET)){ throw std::runtime_error("Problem seeking index file."); }
 	char loadBuff[BCOMPTAB_INDEX_ENTLEN];
@@ -299,7 +299,7 @@ BCompTabularWriter::BCompTabularWriter(int append, BlockCompOutStream* toFlit, c
 	theStr = toFlit;
 	intptr_t annotLen = getFileSize(indFName);
 	if((annotLen >= 0) && (annotLen % BCOMPTAB_INDEX_ENTLEN)){throw std::runtime_error("Malformed index file.");}
-	indF = fopen(indFName, "ab");
+	indF = fopen(indFName, append ? "ab" : "wb");
 	if(indF == 0){ throw std::runtime_error("Could not open index file."); }
 }
 
@@ -328,5 +328,6 @@ void BCompTabularWriter::writeNextEntry(){
 			nat2be64(entrySizes[i], dumpBuff);
 			theStr->writeBytes(dumpBuff, 8);
 		}
+	theStr->flush();
 }
 

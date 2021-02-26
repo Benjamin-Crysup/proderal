@@ -86,4 +86,28 @@ public:
 	std::vector<double> locStore;
 };
 
+/**Optimize using L-BFGS.*/
+class LBFGSOptimizer : public MultivariateOptimizer{
+public:
+	/**Basic setup.*/
+	LBFGSOptimizer();
+	/**Tear down.*/
+	~LBFGSOptimizer();
+	void optimize(MultivariateObjectiveFunction* toSearch, double* fromLoc, double tol);
+	/**The number of steps to save.*/
+	uintptr_t maxHist;
+	/**Storage for gradient history.*/
+	std::vector<double> gradHistS;
+	/**Storage for location history.*/
+	std::vector<double> paramHistS;
+	/**Parameter sized storage.*/
+	std::vector<double> qstoreS;
+	/**History sized storage.*/
+	std::vector<double> astoreS;
+	/**The maximum move (double the tolerance this many times). Zero for unlimited.*/
+	uintptr_t maxDouble;
+	/**If the function itself stops moving, quit early.*/
+	double errorTolerance;
+};
+
 #endif

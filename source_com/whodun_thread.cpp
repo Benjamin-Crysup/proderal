@@ -1,5 +1,6 @@
 
 #include <assert.h>
+#include <stdexcept>
 
 #include "whodun_thread.h"
 #include "whodun_oshook.h"
@@ -9,11 +10,19 @@ void threadFunc(void* thePoolP){
 	lockMutex(thePool->taskMut);
 	while(thePool->poolLive){
 		if(thePool->waitTask.size()){
-			std::pair<void(*)(void*),void*> curTask = thePool->waitTask[0];
+			//run the task
+			ThreadPoolTaskInfo curTask = thePool->waitTask[0];
 			thePool->waitTask.pop_front();
 			unlockMutex(thePool->taskMut);
-			curTask.first(curTask.second);
+			curTask.taskFun(curTask.taskUni);
 			lockMutex(thePool->taskMut);
+			//let things know they're done
+			thePool->doneTasks.insert(curTask.taskID);
+			thePool->hotTasks.erase(curTask.taskID);
+			std::map<uintptr_t,void*>::iterator idIt = thePool->doneCondMap.find(curTask.taskID);
+			if(idIt != thePool->doneCondMap.end()){
+				signalCondition(thePool->taskMut, idIt->second);
+			}
 		}
 		else{
 			waitCondition(thePool->taskMut, thePool->taskCond);
@@ -23,9 +32,9 @@ void threadFunc(void* thePoolP){
 }
 
 ThreadPool::ThreadPool(int numThread){
+	nextID = 0;
 	numThr = numThread;
 	poolLive = true;
-	waitTask = std::deque< std::pair<void(*)(void*), void*> >();
 	taskMut = makeMutex();
 	taskCond = makeCondition(taskMut);
 	for(int i = 0; i<numThread; i++){
@@ -41,43 +50,55 @@ ThreadPool::~ThreadPool(){
 	for(unsigned i = 0; i<liveThread.size(); i++){
 		joinThread(liveThread[i]);
 	}
+	if(hotTasks.size() || doneTasks.size()){
+		//killing pool with stuff in the queue
+		std::terminate();
+	}
+	for(uintptr_t i = 0; i<saveConds.size(); i++){
+		killCondition(saveConds[i]);
+	}
 	killCondition(taskCond);
 	killMutex(taskMut);
 }
 
-void ThreadPool::addTask(void (*toDo)(void*), void* toPass){
+uintptr_t ThreadPool::addTask(void (*toDo)(void*), void* toPass){
 	lockMutex(taskMut);
-		waitTask.push_back( std::pair<void(*)(void*), void*>(toDo, toPass) );
+		while(hotTasks.count(nextID) || doneTasks.count(nextID)){
+			nextID++;
+		}
+		ThreadPoolTaskInfo nextTask = {nextID, toDo, toPass};
+		waitTask.push_back( nextTask );
+		hotTasks.insert(nextID);
+		nextID++;
 		signalCondition(taskMut, taskCond);
 	unlockMutex(taskMut);
+	return nextTask.taskID;
 }
 
-ThreadMultiWait::ThreadMultiWait(){
-	myMut = makeMutex();
-	myCond = makeCondition(myMut);
-	curWait = 0;
-}
-
-ThreadMultiWait::~ThreadMultiWait(){
-	killCondition(myCond);
-	killMutex(myMut);
-}
-
-void ThreadMultiWait::waitOn(unsigned numWait){
-	lockMutex(myMut);
-	curWait += numWait;
-	while(curWait){
-		waitCondition(myMut, myCond);
-	}
-	unlockMutex(myMut);
-}
-
-void ThreadMultiWait::unwaitOne(){
-	lockMutex(myMut);
-	curWait--;
-	if(curWait == 0){
-		broadcastCondition(myMut, myCond);
-	}
-	unlockMutex(myMut);
+void ThreadPool::joinTask(uintptr_t taskID){
+	lockMutex(taskMut);
+		std::set<uintptr_t>::iterator doneIt = doneTasks.find(taskID);
+		if(doneIt == doneTasks.end()){
+			//make a unique condition to wait on
+				void* newCond;
+				if(saveConds.size()){
+					newCond = saveConds[saveConds.size()-1];
+					saveConds.pop_back();
+				}
+				else{
+					newCond = makeCondition(taskMut);
+				}
+			//note the wait and wait
+				doneCondMap[taskID] = newCond;
+				while(doneIt == doneTasks.end()){
+					waitCondition(taskMut, newCond);
+					doneIt = doneTasks.find(taskID);
+				}
+			//clean up
+				saveConds.push_back(newCond);
+				doneCondMap.erase(taskID);
+		}
+		doneTasks.erase(doneIt);
+	unlockMutex(taskMut);
 }
 

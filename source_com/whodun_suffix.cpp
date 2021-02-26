@@ -10,7 +10,12 @@
 //many thanks to geeksforgeeks/suffix-array-set-2-a-nlognlogn-algorithm
 
 void buildSuffixArray(const char* onData, uintptr_t* sortStore){
-	SingleStringSuffixRankSortOption entryCompMeth;
+	SortOptions entryCompMeth;
+		entryCompMeth.itemSize = 3*SUFFIX_ARRAY_CANON_SIZE;
+		entryCompMeth.maxLoad = 4096 * 3 * SUFFIX_ARRAY_CANON_SIZE;
+		entryCompMeth.numThread = 1;
+		entryCompMeth.compMeth = SingleStringSuffixRankSortOption_compMeth;
+		entryCompMeth.useUni = 0;
 	uintptr_t datLen = strlen(onData) + 1;
 	char* allSuffs = (char*)malloc(datLen * 3 * SUFFIX_ARRAY_CANON_SIZE);
 	char* allSuffTmp = allSuffs;
@@ -98,7 +103,12 @@ uintptr_t suffixArrayUpperBound(const char* toFind, const char* onData, uintptr_
 }
 
 void buildMultistringSuffixArray(size_t numStrings, const char** onData, uintptr_t* strIStore, uintptr_t* sortStore){
-	MultiStringSuffixRankSortOption entryCompMeth;
+	SortOptions entryCompMeth;
+		entryCompMeth.itemSize = 4*SUFFIX_ARRAY_CANON_SIZE;
+		entryCompMeth.maxLoad = 4096 * 4 * SUFFIX_ARRAY_CANON_SIZE;
+		entryCompMeth.numThread = 1;
+		entryCompMeth.compMeth = MultiStringSuffixRankSortOption_compMeth;
+		entryCompMeth.useUni = 0;
 	//figure out the individual lengths
 	uintptr_t* curSLens = (uintptr_t*)malloc(numStrings*sizeof(uintptr_t));
 	uintptr_t** stringTmps = (uintptr_t**)malloc(numStrings*sizeof(uintptr_t*));

@@ -373,7 +373,7 @@ GailAQSequenceWriter::GailAQSequenceWriter(int append, BlockCompOutStream* toFli
 	theStr = toFlit;
 	intptr_t annotLen = getFileSize(indFName);
 	if((annotLen >= 0) && (annotLen % GAIL_INDEX_ENTLEN)){throw std::runtime_error("Malformed index file.");}
-	indF = fopen(indFName, "ab");
+	indF = fopen(indFName, append ? "ab" : "wb");
 	if(indF == 0){ throw std::runtime_error("Could not open index file."); }
 }
 
@@ -395,6 +395,7 @@ void GailAQSequenceWriter::writeNextEntry(){
 		fastaLog10ProbsToPhred(nextSeqLen, nextQual, &(tmpQualS[0]));
 		theStr->writeBytes((char*)&(tmpQualS[0]), nextSeqLen);
 	}
+	theStr->flush();
 	if(fwrite(indOutBuff, 1, GAIL_INDEX_ENTLEN, indF)!=GAIL_INDEX_ENTLEN){throw std::runtime_error("Problem writing index file.");}
 }
 

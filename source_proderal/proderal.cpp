@@ -91,6 +91,8 @@ public:
 			addIntegerOption("--thread", &numThread, 0, "    The number of threads to use.\n    --thread 1\n", &threadMeta);
 		ArgumentParserBoolMeta orderMeta("Preserve Order");
 			addBooleanFlag("--order", &preserveOrder, 1, "    Have ProDerAl output items in the original order.\n    Uses more memory if paired entries are far apart in initial file.\n", &orderMeta);
+		ArgumentParserStrVecMeta tagptMeta("Saved Tags");
+			addStringVectorOption("--tagpt", &savedTags, 0, "    Specify which entry tags to pass through.\n    --tagpt BC\n", &tagptMeta);
 	}
 	~ProderalArgumentParser(){}
 	int handleUnknownArgument(int argc, char** argv, std::ostream* helpOut){
@@ -175,6 +177,8 @@ public:
 	intptr_t numThread;
 	/**Whether to preserve order.*/
 	bool preserveOrder;
+	/**Try to preserve extra tags.*/
+	std::vector<char*> savedTags;
 	/**All input sam files.*/
 	std::vector<const char*> allSamIn;
 	/**The default output name.*/
@@ -330,6 +334,8 @@ public:
 	PositionDependentAffineGapLinearPairwiseAlignment alnTables;
 	/**The saved iteration token.*/
 	LinearPairwiseAlignmentIteration* alnIterSave;
+	/**Extra tags that will survive this and pair realignment.*/
+	std::string extraSurv;
 };
 
 /**
@@ -348,6 +354,29 @@ void alignSingleSequence(CRBSAMFileContents* origSeq, PairedAlignmentResultData*
 	std::pair<intptr_t,intptr_t> mainBnd = std::pair<intptr_t,intptr_t>(-1,-1);
 	std::string* mainNameTmp = &(storeFlag->mainNameTmp);
 	mainNameTmp->clear(); mainNameTmp->insert(mainNameTmp->end(), origSeq->entryName.begin(), origSeq->entryName.end());
+	//note any tags to pass through
+	std::string* extraSurv = &(storeFlag->extraSurv);
+	extraSurv->clear();
+	uintptr_t ci = 0;
+	while(ci < origSeq->entryExtra.size()){
+		char* lookSS = &(origSeq->entryExtra[ci]);
+		uintptr_t lookSz = origSeq->entryExtra.size() - ci;
+		char* foundTab = (char*)memchr(lookSS, '\t', lookSz);
+		if(foundTab == 0){ foundTab = lookSS + lookSz; }
+		uintptr_t tabInd = ci + (foundTab - lookSS);
+		//see if it should survive
+		for(uintptr_t i = 0; i<argsP->savedTags.size(); i++){
+			char* curST = argsP->savedTags[i];
+			uintptr_t curSTL = strlen(curST);
+			if(lookSz < curSTL){ continue; }
+			if(memcmp(lookSS, curST, curSTL)){ continue; }
+			//survivor
+			if(extraSurv->size()){ extraSurv->push_back('\t'); }
+			extraSurv->insert(extraSurv->end(), lookSS, foundTab);
+			break;
+		}
+		ci = tabInd + 1;
+	}
 	#define UNTOUCHED_FLAGS (SAM_FLAG_SEQREVCOMP | SAM_FLAG_FILTFAIL | SAM_FLAG_DUPLICATE | SAM_FLAG_FIRST | SAM_FLAG_LAST)
 	#define DUMP_AS_IS \
 		storeAln->liveAlns.resize(1);\
@@ -355,6 +384,8 @@ void alignSingleSequence(CRBSAMFileContents* origSeq, PairedAlignmentResultData*
 		storeAln->liveAlns[0] = &(storeAln->allocAlns[0]);\
 		storeAln->allocAlns[0] = *origSeq;\
 		storeAln->allocAlns[0].entryFlag = storeAln->allocAlns[0].entryFlag & UNTOUCHED_FLAGS;\
+		storeAln->allocAlns[0].entryExtra.clear();\
+		storeAln->allocAlns[0].entryExtra.insert(storeAln->allocAlns[0].entryExtra.end(), extraSurv->begin(), extraSurv->end());\
 		storeAln->liveRanges.clear(); storeAln->liveRanges.push_back(mainBnd);\
 		return;
 	//if it was not aligned, don't try to align, just dump
@@ -533,7 +564,12 @@ void alignSingleSequence(CRBSAMFileContents* origSeq, PairedAlignmentResultData*
 				extraScoreTmp->append("AS:i:");
 				sprintf(numBuffer, "%jd", (intmax_t)(mainIter->alnScore));
 				extraScoreTmp->append(numBuffer);
-				packEnt->entryExtra.clear(); packEnt->entryExtra.insert(packEnt->entryExtra.end(), extraScoreTmp->begin(), extraScoreTmp->end());
+				packEnt->entryExtra.clear();
+					packEnt->entryExtra.insert(packEnt->entryExtra.end(), extraScoreTmp->begin(), extraScoreTmp->end());
+					if(extraSurv->size()){
+						packEnt->entryExtra.push_back('\t');
+						packEnt->entryExtra.insert(packEnt->entryExtra.end(), extraSurv->begin(), extraSurv->end());
+					}
 			tmpRanges->push_back(std::pair<intptr_t,intptr_t>(entryStart,entryEnd));
 			packEnt->entryFlag = origSeq->entryFlag & UNTOUCHED_FLAGS;
 			int isMainAln = (foundMain == 0) && (scoreInd == 0);
@@ -563,6 +599,7 @@ void alignSingleSequence(CRBSAMFileContents* origSeq, PairedAlignmentResultData*
 		}
 	//note which ones should be reported
 		storeAln->liveAlns.clear();
+		storeAln->liveRanges.clear();
 		if(maxCount){
 			std::vector<uintptr_t>* packScoreTake = &(storeFlag->packScoreTake);
 			packScoreTake->resize(mainNumScore);
@@ -641,9 +678,15 @@ void pairAlignDoThing(void* myUni){
 			//handle pair flags
 			for(uintptr_t i = 0; i<mainRes->liveAlns.size(); i++){
 				CRBSAMFileContents* curItem = mainRes->liveAlns[i];
-				curItem->nextReference.insert(curItem->nextReference.end(), curDo->pairEnt->entryReference.begin(), curDo->pairEnt->entryReference.end());
+				//clean up: dump as is might break things
+					curItem->nextReference.clear();
+					curItem->nextPos = -1;
+					curItem->entryTempLen = 0;
+				//also strip out any extras known to depend on pairs
+					//TODO
 				curItem->entryFlag |= SAM_FLAG_MULTSEG;
 				if(pairFlag.haveAln){
+					curItem->nextReference.insert(curItem->nextReference.end(), curDo->pairEnt->entryReference.begin(), curDo->pairEnt->entryReference.end());
 					curItem->nextPos = pairFlag.alnLow;
 					if((curItem->entryFlag & SAM_FLAG_SEGUNMAP) == 0){
 						curItem->entryFlag |= SAM_FLAG_ALLALN;
@@ -664,9 +707,15 @@ void pairAlignDoThing(void* myUni){
 			}
 			for(uintptr_t i = 0; i<pairRes->liveAlns.size(); i++){
 				CRBSAMFileContents* curItem = pairRes->liveAlns[i];
-				curItem->nextReference.insert(curItem->nextReference.end(), curDo->mainEnt->entryReference.begin(), curDo->mainEnt->entryReference.end());
+				//clean up: dump as is might break things
+					curItem->nextReference.clear();
+					curItem->nextPos = -1;
+					curItem->entryTempLen = 0;
+				//also strip out any extras known to depend on pairs
+					//TODO
 				curItem->entryFlag |= SAM_FLAG_MULTSEG;
 				if(mainFlag.haveAln){
+					curItem->nextReference.insert(curItem->nextReference.end(), curDo->mainEnt->entryReference.begin(), curDo->mainEnt->entryReference.end());
 					curItem->nextPos = mainFlag.alnLow;
 					if((curItem->entryFlag & SAM_FLAG_SEGUNMAP) == 0){
 						curItem->entryFlag |= SAM_FLAG_ALLALN;

@@ -8,6 +8,7 @@
 
 #include <zlib.h>
 
+#include "whodun_thread.h"
 #include "whodun_datread.h"
 
 /**A method for compressing files.*/
@@ -46,6 +47,7 @@ public:
 	~BlockCompOutStream();
 	void writeByte(int toW);
 	void writeBytes(const char* toW, uintptr_t numW);
+	void flush();
 	/**Get the number of (uncompressed) bytes already written.*/
 	uintptr_t tell();
 	/**Dump the data.*/
@@ -90,6 +92,8 @@ public:
 	uintptr_t getUncompressedSize();
 	/**The number of blocks in the file.*/
 	uintptr_t numBlocks;
+	/**The annotation index at the start of lastLineBuff.*/
+	uintptr_t lastLineBI0;
 	/**The number of blocks accounted for in lastLineBuff.*/
 	uintptr_t numLastLine;
 	/**Temporary storage for a seek.*/
@@ -143,6 +147,52 @@ public:
 	gzFile baseFile;
 	/**The name of the file.*/
 	std::string myName;
+};
+
+class MultithreadGZipOutStreamUniform;
+
+/**GZip output, but with multiple threads.*/
+class MultithreadGZipOutStream : public OutStream{
+public:
+	/**
+	 * Set up the output.
+	 * @param append Whether to append to a file if it is already there.
+	 * @param fileName The file to write to.
+	 * @param numThreads The number of threads to spawn.
+	 */
+	MultithreadGZipOutStream(int append, const char* fileName, int numThreads);
+	/**
+	 * Set up the output.
+	 * @param append Whether to append to a file if it is already there.
+	 * @param fileName The file to write to.
+	 * @param numThreads The number of threads to spawn.
+	 * @param useThreads The threads to use.
+	 */
+	MultithreadGZipOutStream(int append, const char* fileName, int numThreads, ThreadPool* useThreads);
+	/**Clean up and close.*/
+	~MultithreadGZipOutStream();
+	void writeByte(int toW);
+	void writeBytes(const char* toW, uintptr_t numW);
+	/**The base file.*/
+	FILE* baseFile;
+	/**The name of the file.*/
+	std::string myName;
+	/**The number of threads.*/
+	uintptr_t numThread;
+	/**The threads to use for compression.*/
+	ThreadPool* compThreads;
+	/**Whether to kill the pool.*/
+	bool killPool;
+	/**Uniforms for the threads.*/
+	std::vector<MultithreadGZipOutStreamUniform> threadUnis;
+	/**The next thread uni to add data to.*/
+	uintptr_t nextTUni;
+	/**The next thread uni to output.*/
+	uintptr_t nextOUni;
+	/**Internal method to start compressing the next block.*/
+	void startCompressing();
+	/**Internal method to dump an entry.*/
+	void startDumping();
 };
 
 /**Compress by doing nothing.*/

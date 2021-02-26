@@ -8,8 +8,8 @@ typedef struct{
 	const void* myFrom;
 	/**The number of bytes to copy.*/
 	size_t myNumB;
-	/**The sync point.*/
-	ThreadMultiWait* myReport;
+	/**The ID of this task.*/
+	uintptr_t threadID;
 } MTMemcpyUniform;
 
 /**
@@ -19,11 +19,9 @@ typedef struct{
 void memcpymt_sub(void* myUni){
 	MTMemcpyUniform* rUni = (MTMemcpyUniform*)myUni;
 	memcpy(rUni->myTo, rUni->myFrom, rUni->myNumB);
-	rUni->myReport->unwaitOne();
 }
 
 void* memcpymt(void* cpyTo, const void* cpyFrom, size_t numBts, unsigned numThread, ThreadPool* mainPool){
-	ThreadMultiWait mainWait;
 	std::vector<MTMemcpyUniform> memcpyUnis;
 	memcpyUnis.resize(numThread);
 	size_t numPerT = numBts / numThread;
@@ -33,12 +31,16 @@ void* memcpymt(void* cpyTo, const void* cpyFrom, size_t numBts, unsigned numThre
 		void* curTo = ((char*)cpyTo) + curOff;
 		const void* curFrom = ((const char*)cpyFrom) + curOff;
 		size_t curNum = numPerT + (i<numExtT);
-		MTMemcpyUniform curUniD = {curTo, curFrom, curNum, &mainWait};
-		memcpyUnis[i] = curUniD;
-		mainPool->addTask(memcpymt_sub, &(memcpyUnis[i]));
+		MTMemcpyUniform* curUniD = &(memcpyUnis[i]);
+			curUniD->myTo = curTo;
+			curUniD->myFrom = curFrom;
+			curUniD->myNumB = curNum;
+		curUniD->threadID = mainPool->addTask(memcpymt_sub, curUniD);
 		curOff += curNum;
 	}
-	mainWait.waitOn(numThread);
+	for(uintptr_t i = 0; i<numThread; i++){
+		mainPool->joinTask(memcpyUnis[i].threadID);
+	}
 	return cpyTo;
 }
 
@@ -50,8 +52,8 @@ typedef struct{
 	int myVal;
 	/**The number of bytes.*/
 	size_t myNumB;
-	/**The sync point.*/
-	ThreadMultiWait* myReport;
+	/**The ID of this task.*/
+	uintptr_t threadID;
 } MTMemsetUniform;
 
 /**
@@ -61,11 +63,9 @@ typedef struct{
 void memsetmt_sub(void* myUni){
 	MTMemsetUniform* rUni = (MTMemsetUniform*)myUni;
 	memset(rUni->myTo, rUni->myVal, rUni->myNumB);
-	rUni->myReport->unwaitOne();
 }
 
 void* memsetmt(void* setP, int value, size_t numBts, unsigned numThread, ThreadPool* mainPool){
-	ThreadMultiWait mainWait;
 	std::vector<MTMemsetUniform> memcpyUnis;
 	memcpyUnis.resize(numThread);
 	size_t numPerT = numBts / numThread;
@@ -74,11 +74,15 @@ void* memsetmt(void* setP, int value, size_t numBts, unsigned numThread, ThreadP
 	for(unsigned i = 0; i<numThread; i++){
 		void* curTo = ((char*)setP) + curOff;
 		size_t curNum = numPerT + (i<numExtT);
-		MTMemsetUniform curUniD = {curTo, value, curNum, &mainWait};
-		memcpyUnis[i] = curUniD;
-		mainPool->addTask(memsetmt_sub, &(memcpyUnis[i]));
+		MTMemsetUniform* curUniD = &(memcpyUnis[i]);
+			curUniD->myTo = curTo;
+			curUniD->myVal = value;
+			curUniD->myNumB = curNum;
+		curUniD->threadID = mainPool->addTask(memsetmt_sub, curUniD);
 		curOff += curNum;
 	}
-	mainWait.waitOn(numThread);
+	for(uintptr_t i = 0; i<numThread; i++){
+		mainPool->joinTask(memcpyUnis[i].threadID);
+	}
 	return setP;
 }

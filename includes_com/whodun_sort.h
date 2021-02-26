@@ -11,17 +11,22 @@ class SortOptions{
 public:
 	/**
 	 * The method to use for comparison.
+	 * @param unif A uniform for the comparison.
 	 * @param itemA The first item.
 	 * @param itemB The second item.
 	 * @return Whther itemA should come before itemB.
 	 */
-	bool (*compMeth)(void* itemA,void* itemB);
+	bool (*compMeth)(void* unif, void* itemA,void* itemB);
 	/**The size of each item.*/
 	uintptr_t itemSize;
 	/**The maximum number of bytes to load at any given time.*/
 	uintptr_t maxLoad;
 	/**The number of threads this should use.*/
 	uintptr_t numThread;
+	/**The uniform to use.*/
+	void* useUni;
+	/**The thread pool to use, if any.*/
+	ThreadPool* usePool;
 };
 
 /**
@@ -41,7 +46,7 @@ void inMemoryMergesort(uintptr_t numEnts, char* inMem, SortOptions* opts);
  */
 void outOfMemoryMergesort(InStream* startF, const char* tempFolderName, OutStream* outF, SortOptions* opts);
 
-/**An pipe for collecting data from multiple threads that is intended to be sorted (i.e. order doesn't REALLY matter).*/
+/**An pipe for collecting data from multiple threads that is intended to be sorted (i.e. input order doesn't REALLY matter).*/
 class PreSortMultithreadPipe : public InStream{
 public:
 	/**
@@ -73,6 +78,28 @@ public:
 	OSMutex drainMut;
 	/**Used to wait for a clear buffer.*/
 	OSCondition drainCon;
+	/**Used to wait for a full buffer.*/
+	OSCondition fillCon;
 };
+
+/**
+ * Perform a lower_bound-type search.
+ * @param numEnts The number of items to search through.
+ * @param inMem The items to search through.
+ * @param lookFor The thing to look for.
+ * @param opts The options for the sort.
+ * @return The lower_bound insertion index.
+ */
+char* whodunSortLowerBound(uintptr_t numEnts, char* inMem, char* lookFor, SortOptions* opts);
+
+/**
+ * Perform a upper_bound-type search.
+ * @param numEnts The number of items to search through.
+ * @param inMem The items to search through.
+ * @param lookFor The thing to look for.
+ * @param opts The options for the sort.
+ * @return The upper_bound insertion index.
+ */
+char* whodunSortUpperBound(uintptr_t numEnts, char* inMem, char* lookFor, SortOptions* opts);
 
 #endif
