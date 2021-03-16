@@ -83,6 +83,8 @@ public:
 	std::vector<char> jumpPassThroughV;
 	/**Temporary storage for a map from node names to node indices.*/
 	std::map<std::string,uintptr_t> nodeNameMap;
+	/**Temporary storage for nodes lacking a self link.*/
+	std::set<uintptr_t> nodeSelfL;
 };
 
 #endif

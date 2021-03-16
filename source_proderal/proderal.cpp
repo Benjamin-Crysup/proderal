@@ -628,6 +628,23 @@ void alignSingleSequence(CRBSAMFileContents* origSeq, PairedAlignmentResultData*
 				storeAln->liveRanges.push_back((*tmpRanges)[i]);
 			}
 		}
+	//if no alignments, mark unaligned
+		if(storeAln->liveAlns.size() == 0){
+			storeFlag->haveAln = 0;
+			if(storeAln->allocAlns.size() < 1){ storeAln->allocAlns.resize(1); }
+			CRBSAMFileContents* endRep = &(storeAln->allocAlns[0]);
+			storeAln->liveAlns.resize(1);
+			storeAln->liveAlns[0] = endRep;
+			*endRep = *origSeq;
+			endRep->entryFlag = storeAln->allocAlns[0].entryFlag & UNTOUCHED_FLAGS;
+			endRep->entryReference.clear();
+			endRep->entryPos = -1;
+			endRep->entryMapq = 255;
+			endRep->entryCigar.clear();
+			endRep->entryExtra.clear();
+			endRep->entryExtra.insert(endRep->entryExtra.end(), extraSurv->begin(), extraSurv->end());
+			storeAln->liveRanges.clear(); storeAln->liveRanges.push_back(mainBnd);
+		}
 }
 
 /**Arguments to the threads that do the work.*/

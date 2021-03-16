@@ -58,6 +58,7 @@ int SequenceGraphReader::readNextEntry(){
 				nodeNameStore.insert(nodeNameStore.end(), baseSeq+i+1, semicLoc);
 				nodeNameStore.push_back(0);
 				nodeCharIndV.push_back(seqStore.size());
+				i = (semicLoc - baseSeq) + 1;
 			}
 			else if(baseSeq[i] == '['){
 				const char* rbrackLoc = (const char*)memchr(baseSeq+i, ']', baseSeqLen-i);
@@ -88,6 +89,7 @@ int SequenceGraphReader::readNextEntry(){
 				jumpCharIndV.push_back(seqStore.size());
 				jumpNumJumpsV.push_back(numTgts);
 				jumpPassThroughV.push_back(isFT);
+				i = (rbrackLoc - baseSeq) + 1;
 			}
 			else{
 				throw std::runtime_error("Mismatched bracket.");
@@ -111,7 +113,7 @@ int SequenceGraphReader::readNextEntry(){
 		char** jumpPTmp = totNumTgts ? &(jumpTgtStoreP[0]) : 0;
 		jumpTgtStorePP.resize(jumpCharIndV.size());
 		for(uintptr_t i = 0; i<jumpCharIndV.size(); i++){
-			jumpTgtStorePP.push_back(jumpPTmp);
+			jumpTgtStorePP[i] = jumpPTmp;
 			jumpPTmp += jumpNumJumpsV[i];
 		}
 	//and make the results visible
@@ -141,24 +143,41 @@ void SequenceGraphReader::flattenGraph(SequenceGraph* storeGraph){
 		for(uintptr_t i = 0; i<numNode; i++){
 			nodeNameMap[nodeNames[i]] = nodeCharInd[i];
 		}
-	//start adding jumps
+	//start adding forward jumps
 		storeGraph->forwJumps.clear();
-		storeGraph->backJumps.clear();
 		for(uintptr_t i = 0; i<numJumps; i++){
 			uintptr_t jumpBefore = jumpCharInd[i];
 			uintptr_t numJ = jumpNumJumps[i];
 			for(uintptr_t j = 0; j<numJ; j++){
 				uintptr_t jumpTo = nodeNameMap[jumpTgtNames[i][j]];
 				storeGraph->forwJumps.push_back(std::pair<uintptr_t,uintptr_t>(jumpBefore,jumpTo));
-				storeGraph->forwJumps.push_back(std::pair<uintptr_t,uintptr_t>(jumpTo,jumpBefore));
 			}
 			if(jumpPassThrough[i]){
 				storeGraph->forwJumps.push_back(std::pair<uintptr_t,uintptr_t>(jumpBefore,jumpBefore));
-				storeGraph->forwJumps.push_back(std::pair<uintptr_t,uintptr_t>(jumpBefore,jumpBefore));
 			}
 		}
-	//sort the jumps
 		std::sort(storeGraph->forwJumps.begin(), storeGraph->forwJumps.end());
+	//all targets that have no origin entries need a self origin
+		nodeSelfL.clear();
+		for(uintptr_t i = 0; i<storeGraph->forwJumps.size(); i++){
+			uintptr_t curTgt = storeGraph->forwJumps[i].second;
+			std::vector< std::pair<uintptr_t,uintptr_t> >::iterator tgtOriB = std::lower_bound(storeGraph->forwJumps.begin(), storeGraph->forwJumps.end(), std::pair<uintptr_t,uintptr_t>(curTgt, 0));
+			std::vector< std::pair<uintptr_t,uintptr_t> >::iterator tgtOriE = std::upper_bound(storeGraph->forwJumps.begin(), storeGraph->forwJumps.end(), std::pair<uintptr_t,uintptr_t>(curTgt, (uintptr_t)-1));
+			if(tgtOriB == tgtOriE){
+				nodeSelfL.insert(curTgt);
+			}
+		}
+		for(std::set<uintptr_t>::iterator curIt = nodeSelfL.begin(); curIt != nodeSelfL.end(); curIt++){
+			storeGraph->forwJumps.push_back( std::pair<uintptr_t,uintptr_t>(*curIt, *curIt) );
+		}
+		std::sort(storeGraph->forwJumps.begin(), storeGraph->forwJumps.end());
+	//add the backward jumps
+		storeGraph->backJumps.clear();
+		for(uintptr_t i = 0; i<storeGraph->forwJumps.size(); i++){
+			std::pair<uintptr_t,uintptr_t> curDat = storeGraph->forwJumps[i];
+			std::pair<uintptr_t,uintptr_t> curRev = std::pair<uintptr_t,uintptr_t>(curDat.second, curDat.first);
+			storeGraph->backJumps.push_back(curRev);
+		}
 		std::sort(storeGraph->backJumps.begin(), storeGraph->backJumps.end());
 }
 

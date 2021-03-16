@@ -89,6 +89,7 @@ int FastAQSequenceReader::readNextEntry(){
 		nameStore.clear();
 		seqStore.clear();
 		qualStore.clear();
+		tmpQualS.clear();
 	//read to the end of the line: everything goes
 		while(true){
 			const char* eolLoc = (const char*)memchr(readBuff + readBuffO, '\n', readBuffS);
@@ -151,7 +152,7 @@ int FastAQSequenceReader::readNextEntry(){
 		}
 		while(true){
 			const char* eolLoc = (const char*)memchr(readBuff + readBuffO, '\n', readBuffS);
-			int numEat = eolLoc ? (eolLoc - (readBuff + readBuffO)) : readBuffS;
+			int numEat = eolLoc ? (1+(eolLoc - (readBuff + readBuffO))) : readBuffS;
 			readBuffO += numEat;
 			readBuffS -= numEat;
 			if(eolLoc){break;}

@@ -1,5 +1,72 @@
 #include "whodun_args.h"
 
+#include <string.h>
+
+#define LOAD_CHUNK_SIZE 2048
+
+ArgumentRedirectParser::ArgumentRedirectParser(int argc, char** argv){
+	std::vector<uintptr_t> tmpOffsets;
+	for(int i = 0; i<argc; i++){
+		char* curArg = argv[i];
+		uintptr_t cargLen = strlen(curArg);
+		//handle common argument
+		if(curArg[0] != '@'){
+			tmpOffsets.push_back(allText.size());
+			allText.insert(allText.end(), curArg, curArg + cargLen + 1);
+			continue;
+		}
+		
+		//load the file
+		std::vector<char> subText;
+		FILE* fileLoad = fopen(curArg + 1, "rb");
+		if(fileLoad == 0){
+			std::string errMess("Could not open argument file: ");
+			errMess.append(curArg+1);
+			throw std::runtime_error(errMess);
+		}
+		char loadBuff[LOAD_CHUNK_SIZE];
+		uintptr_t numLoad = fread(loadBuff, 1, LOAD_CHUNK_SIZE, fileLoad);
+		while(numLoad){
+			subText.insert(subText.end(), loadBuff, loadBuff + numLoad);
+			numLoad = fread(loadBuff, 1, LOAD_CHUNK_SIZE, fileLoad);
+		}
+		fclose(fileLoad);
+		//replace all newlines with 0
+		for(uintptr_t j = 0; j<subText.size(); j++){
+			if((subText[j] == '\r') || (subText[j] == '\n')){
+				subText[j] = 0;
+			}
+		}
+		subText.push_back(0);
+		//block arguments
+		std::vector<char*> subArgs;
+		uintptr_t sj = 0;
+		while(sj < subText.size()){
+			char* curSub = &(subText[sj]);
+			uintptr_t curSubL = strlen(curSub);
+			if(curSubL){
+				subArgs.push_back(curSub);
+			}
+			sj += (curSubL + 1);
+		}
+		//recurse
+		ArgumentRedirectParser subRed(subArgs.size(), subArgs.size() ? &(subArgs[0]) : (char**)0);
+		//and claim arguments
+		for(uintptr_t j = 0; j<subRed.allArgs.size(); j++){
+			char* curSub = subRed.allArgs[j];
+			uintptr_t curSubL = strlen(curSub);
+			tmpOffsets.push_back(allText.size());
+			allText.insert(allText.end(), curSub, curSub + curSubL + 1);
+		}
+	}
+	//figure out the pointers
+	for(uintptr_t i = 0; i<tmpOffsets.size(); i++){
+		allArgs.push_back(&(allText[tmpOffsets[i]]));
+	}
+}
+
+ArgumentRedirectParser::~ArgumentRedirectParser(){}
+
 ArgumentParserBoolMeta::ArgumentParserBoolMeta(){
 	hidden = false;
 }
@@ -205,7 +272,6 @@ int ArgumentParser::parseArguments(int argc, char** argv, std::ostream* helpOut)
 			needRun = 0;
 			return ci+1;
 		}
-		//TODO @filenam load
 		if(boolHotFlags.find(carg) != boolHotFlags.end()){
 			*boolHotFlags[carg] = true;
 			ci++; continue;
@@ -272,6 +338,10 @@ int ArgumentParser::parseArguments(int argc, char** argv, std::ostream* helpOut)
 		return -1;
 	}
 	return ci;
+}
+
+int ArgumentParser::parseArguments(ArgumentRedirectParser* loadArgs, std::ostream* helpOut){
+	return parseArguments(loadArgs->allArgs.size(), loadArgs->allArgs.size() ? &(loadArgs->allArgs[0]) : (char**)0, helpOut);
 }
 
 void ArgumentParser::printHelpDocumentation(std::ostream* toPrint){

@@ -7,6 +7,23 @@
 #include <vector>
 #include <iostream>
 
+/**Handle loading arguments from file.*/
+class ArgumentRedirectParser{
+public:
+	/**
+	 * Load in any redirect arguments.
+	 * @param argc The starting number of arguments.
+	 * @param argv The starting arguments.
+	 */
+	ArgumentRedirectParser(int argc, char** argv);
+	/**Clean up.*/
+	~ArgumentRedirectParser();
+	/**The text of all the arguments.*/
+	std::vector<char> allText;
+	/**The arguments themselves.*/
+	std::vector<char*> allArgs;
+};
+
 /**Meta information for a boolean flag.*/
 class ArgumentParserBoolMeta{
 public:
@@ -211,6 +228,13 @@ public:
 	 * @return The number of consumed arguments: negative for error.
 	 */
 	int parseArguments(int argc, char** argv, std::ostream* helpOut);
+	/**
+	 * Parse arguments.
+	 * @param loadArgs The loaded arguments.
+	 * @param helpOut The place to write help to.
+	 * @return The number of consumed arguments: negative for error.
+	 */
+	int parseArguments(ArgumentRedirectParser* loadArgs, std::ostream* helpOut);
 	
 	/**Whether the program should try to run.*/
 	int needRun;

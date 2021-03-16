@@ -1859,7 +1859,7 @@ void PositionDependentAffineGapLinearPairwiseAlignmentIteration::iterateNextPath
 			curFoc->liveDirs = curFoc->liveDirs & (~curDirFlag);\
 			intptr_t** lookTable = baseAlnPD->lookTable;\
 			intptr_t** checkTable = baseAlnPD->checkTable;\
-			if(negToZero && (checkTable[li][lj] == 0)){ goto tailRecursionTgt; }\
+			if(negToZero && (lookTable[li][lj] == 0)){ goto tailRecursionTgt; }\
 			intptr_t newScore = curFoc->pathScore + lookTable[li][lj] - checkTable[li][lj];\
 			if(newScore != curFoc->pathScore){ lastIterChange = true; }\
 				else{ lastIterChange = curFoc->seenDef; curFoc->seenDef = 1; }\
@@ -1955,6 +1955,69 @@ void PositionDependentAffineGapLinearPairwiseAlignmentIteration::dumpPath(){
 
 bool PositionDependentAffineGapLinearPairwiseAlignmentIteration::lastIterationChangedPath(){
 	return lastIterChange;
+}
+
+/**
+ * Print out a table.
+ * @param os The place to print.
+ * @param seqAs The reference sequence.
+ * @param seqBs The read sequence.
+ * @param theTab The table to print.
+ */
+void printPositionDependentCostTable(std::ostream& os, std::string* seqAs, std::string* seqBs, intptr_t** theTab){
+	uintptr_t lenA = seqAs->size();
+	uintptr_t lenB = seqBs->size();
+	//print out the first row
+	os << "\t_";
+	for(uintptr_t j = 0; j<lenB; j++){
+		os << "\t" << (*seqBs)[j];
+	}
+	os << std::endl;
+	//print out the first row of costs
+	os << "_";
+	for(uintptr_t j = 0; j<=lenB; j++){
+		os << "\t" << theTab[0][j];
+	}
+	os << std::endl;
+	//run down the rows
+	for(uintptr_t i = 0; i<lenA; i++){
+		os << (*seqAs)[i];
+		for(uintptr_t j = 0; j<=lenB; j++){
+			os << "\t" << theTab[i+1][j];
+		}
+		os << std::endl;
+	}
+}
+
+std::ostream& operator<<(std::ostream& os, const PositionDependentAffineGapLinearPairwiseAlignment& toOut){
+	//print out the tables
+	os << "Cost" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.costTable);
+	os << "Match" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.matchTable);
+	os << "Skip A" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipATable);
+	os << "Skip B" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipBTable);
+	os << "Match Match" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.matchMatchTable);
+	os << "Match Skip A" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.matchSkipATable);
+	os << "Match Skip B" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.matchSkipBTable);
+	os << "Skip A Match" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipAMatchTable);
+	os << "Skip A Skip A" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipASkipATable);
+	os << "Skip A Skip B" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipASkipBTable);
+	os << "Skip B Match" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipBMatchTable);
+	os << "Skip B Skip A" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipBSkipATable);
+	os << "Skip B Skip B" << std::endl;
+	printPositionDependentCostTable(os, toOut.seqAs, toOut.seqBs, toOut.skipBSkipBTable);
+	return os;
 }
 
 

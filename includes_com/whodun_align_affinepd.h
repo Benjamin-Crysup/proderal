@@ -430,4 +430,7 @@ public:
 	std::vector<AlignCostAffine*> skbCosts;
 };
 
+/**Output tables for debug.*/
+std::ostream& operator<<(std::ostream& os, const PositionDependentAffineGapLinearPairwiseAlignment& toOut);
+
 #endif
