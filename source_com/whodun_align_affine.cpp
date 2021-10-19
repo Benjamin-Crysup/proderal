@@ -60,6 +60,27 @@ AlignCostAffine::~AlignCostAffine(){
 	if(allMMCost){free(allMMCost);}
 }
 
+void AlignCostAffine::identitySpecification(int matchCost, int mismatchCost){
+	if(allMMCost){free(allMMCost);}
+	numLiveChars = 256;
+	allMMCost = (int**)malloc(numLiveChars*sizeof(int*) + numLiveChars*numLiveChars*sizeof(int));
+	int* curMCFoc = (int*)(allMMCost + numLiveChars);
+	for(int i = 0; i<numLiveChars; i++){
+		allMMCost[i] = curMCFoc;
+		curMCFoc += numLiveChars;
+	}
+	for(int i = 0; i<numLiveChars; i++){
+		charMap[i] = i;
+		for(int j = 0; j<i; j++){
+			allMMCost[i][j] = mismatchCost;
+		}
+		allMMCost[i][i] = matchCost;
+		for(int j = i+1; j<numLiveChars; j++){
+			allMMCost[i][j] = mismatchCost;
+		}
+	}
+}
+
 const char* AlignCostAffine::parseSpecification(const char* parseS, const char* parseE){
 	free(allMMCost); allMMCost = 0;
 	const char* curFoc = parseS;

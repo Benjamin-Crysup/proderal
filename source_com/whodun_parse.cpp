@@ -15,6 +15,19 @@ void splitOnCharacter(const char* splitF, const char* splitT, int splitC, std::v
 	splitE->push_back(splitT);
 }
 
+void splitOnCharacter(char* splitF, char* splitT, int splitC, std::vector<char*>* splitS, std::vector<char*>* splitE){
+	splitS->push_back(splitF);
+	char* curSt = splitF;
+	char* curEn = (char*)memchr(curSt, splitC, splitT - curSt);
+	while(curEn){
+		splitE->push_back(curEn);
+		curSt = curEn + 1;
+		splitS->push_back(curSt);
+		curEn = (char*)memchr(curSt, splitC, splitT - curSt);
+	}
+	splitE->push_back(splitT);
+}
+
 void splitOnCharacters(const char* splitF, const char* splitT, int splitCN, const char* splitCs, std::vector<const char*>* splitS, std::vector<const char*>* splitE){
 	std::vector<const char*> curTokS; curTokS.push_back(splitF);
 	std::vector<const char*> curTokE; curTokE.push_back(splitT);

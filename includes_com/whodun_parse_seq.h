@@ -107,7 +107,7 @@ public:
 	/**Make sure the buffer has stuff in it.*/
 	void fillBuffer();
 };
-
+//TODO quality as double
 /**Read sequences from a gail file.*/
 class GailAQSequenceReader : public SequenceReader{
 public:
@@ -160,6 +160,43 @@ public:
 	std::vector<unsigned char> tmpQualS;
 	/**The allocation for the qualities.*/
 	std::vector<double> qualStore;
+};
+
+/**Read sequences sequentially from a gail file.*/
+class SequentialGailAQSequenceReader : public SequenceReader{
+public:
+	/**
+	 * Make a sequence reader.
+	 * @param toFlit The thing to read from.
+	 * @param indFName The name of the index file.
+	 * @param loadSize The amount of data to load at once.
+	 * @param useTCount The number of threads to use (for converting qualities).
+	 * @param useThreads The threads to use.
+	 */
+	SequentialGailAQSequenceReader(InStream* toFlit, const char* indFName, uintptr_t loadSize, uintptr_t useTCount, ThreadPool* useThreads);
+	/**Clean up.*/
+	~SequentialGailAQSequenceReader();
+	
+	int readNextEntry();
+	
+	/**The actual thing to read.*/
+	InStream* theStr;
+	/**The index file.*/
+	FILE* indF;
+	/**The amount of data to load at once.*/
+	uintptr_t bufferSize;
+	/**The number of entries in the file.*/
+	uintptr_t numEntries;
+	/**The number of entries read through (the index of entry zero in the cache).*/
+	uintptr_t handEntries;
+	/**The next entry in the cache to report.*/
+	uintptr_t nextReport;
+	/**The header data for the stuff in the cache.*/
+	std::vector<uintptr_t> cacheEntries;
+	/**The allocated size of the cache.*/
+	uintptr_t cacheSize;
+	/**The cache.*/
+	char* cache;
 };
 
 /**Write sequence data.*/
@@ -216,11 +253,20 @@ public:
 	 * @param indFName The name of the index file.
 	 */
 	GailAQSequenceWriter(int append, BlockCompOutStream* toFlit, const char* indFName);
+	/**
+	 * Make a sequence writer.
+	 * @param append Whether stuff is being appended.
+	 * @param toFlit The thing to write to.
+	 * @param indFName The name of the index file.
+	 */
+	GailAQSequenceWriter(MultithreadBlockCompOutStream* toFlit, const char* indFName);
 	/**Tear down.*/
 	virtual ~GailAQSequenceWriter();
 	void writeNextEntry();
 	/**The thing to parse.*/
 	BlockCompOutStream* theStr;
+	/**Aleternate place to write*/
+	MultithreadBlockCompOutStream* theStrMT;
 	/**The index file.*/
 	FILE* indF;
 	/**Storage for the quality characters.*/

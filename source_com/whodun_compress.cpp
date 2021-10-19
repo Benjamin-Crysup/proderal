@@ -255,6 +255,407 @@ uintptr_t BlockCompInStream::getUncompressedSize(){
 	return be2nat64(tmpBuff) + be2nat64(tmpBuff+16);
 }
 
+/**Multithread stuff for block compression.*/
+class MultithreadBlockCompOutStreamUniform{
+public:
+	/**Set up an empty uniform.*/
+	MultithreadBlockCompOutStreamUniform();
+	/**Clean up any data.*/
+	~MultithreadBlockCompOutStreamUniform();
+	/**The compression method.*/
+	CompressionMethod* compMeth;
+	/**If it has, the ID to wait on.*/
+	uintptr_t threadID;
+	/**Whether this task has been waited on.*/
+	int hasWait;
+	/**The threads to use for compression.*/
+	ThreadPool* compThreads;
+	/**The place to get data from (used for fill tasks).*/
+	const char* insertFrom;
+	/**The amount of data to fill with.*/
+	uintptr_t insertNum;
+};
+
+MultithreadBlockCompOutStreamUniform::MultithreadBlockCompOutStreamUniform(){
+	compMeth = 0;
+	hasWait = 1;
+	compThreads = 0;
+}
+
+MultithreadBlockCompOutStreamUniform::~MultithreadBlockCompOutStreamUniform(){
+	if(!hasWait){
+		compThreads->joinTask(threadID);
+		hasWait = 1;
+	}
+	if(compMeth){ delete(compMeth); }
+}
+
+/**Fill thing with data.*/
+void multithreadBlockCompOutFill(void* theUni){
+	MultithreadBlockCompOutStreamUniform* myU = (MultithreadBlockCompOutStreamUniform*)theUni;
+	myU->compMeth->theData.insert(myU->compMeth->theData.end(), myU->insertFrom, myU->insertFrom + myU->insertNum);
+}
+
+/**Compress a thing.*/
+void multithreadBlockCompOutCompress(void* theUni){
+	MultithreadBlockCompOutStreamUniform* myU = (MultithreadBlockCompOutStreamUniform*)theUni;
+	myU->compMeth->compressData();
+}
+
+MultithreadBlockCompOutStream::MultithreadBlockCompOutStream(int append, uintptr_t blockSize, const char* mainFN, const char* annotFN, CompressionMethod* compMeth, int numThreads, ThreadPool* useThreads){
+	chunkSize = blockSize;
+	if(append && fileExists(annotFN)){
+		intptr_t annotLen = getFileSize(annotFN);
+		if(annotLen < 0){std::string errMess("Problem examining annotation file "); errMess.append(annotFN); throw std::runtime_error(errMess);}
+		if(annotLen % BLOCKCOMP_ANNOT_ENTLEN){throw std::runtime_error("Malformed annotation file.");}
+		FILE* annotTmp = fopen(annotFN, "rb");
+		if(annotTmp == 0){throw std::runtime_error("Problem opening annotation file.");}
+		if(fseekPointer(annotTmp, annotLen - BLOCKCOMP_ANNOT_ENTLEN, SEEK_SET)){fclose(annotTmp); throw std::runtime_error("Problem positioning annotation file.");}
+		char tmpBuff[BLOCKCOMP_ANNOT_ENTLEN];
+		if(fread(tmpBuff, 1, BLOCKCOMP_ANNOT_ENTLEN, annotTmp) != BLOCKCOMP_ANNOT_ENTLEN){fclose(annotTmp); throw std::runtime_error("Problem reading annotation file.");}
+		fclose(annotTmp);
+		preCompBS = be2nat64(tmpBuff) + be2nat64(tmpBuff + 16);
+		postCompBS = be2nat64(tmpBuff+8) + be2nat64(tmpBuff + 24);
+		mainF = fopen(mainFN, "ab");
+		if(mainF == 0){
+			throw std::runtime_error("Problem opening main block file.");
+		}
+		annotF = fopen(annotFN, "ab");
+		if(annotF == 0){
+			fclose(mainF);
+			throw std::runtime_error("Problem opening annotation block file.");
+		}
+	}
+	else{
+		preCompBS = 0;
+		postCompBS = 0;
+		mainF = fopen(mainFN, "wb");
+		if(mainF == 0){
+			throw std::runtime_error("Problem opening main block file.");
+		}
+		annotF = fopen(annotFN, "wb");
+		if(annotF == 0){
+			fclose(mainF);
+			throw std::runtime_error("Problem opening annotation block file.");
+		}
+	}
+	totalWrite = preCompBS;
+	compThreads = useThreads;
+	threadUnis.resize(numThreads);
+	for(uintptr_t i = 0; i<threadUnis.size(); i++){
+		threadUnis[i].compMeth = compMeth->clone();
+		threadUnis[i].compThreads = compThreads;
+		waitingUnis.push_back(&(threadUnis[i]));
+	}
+	fillingTmp = 0;
+}
+
+MultithreadBlockCompOutStream::~MultithreadBlockCompOutStream(){
+	flush();
+	while(compressingUnis.size()){
+		getOpenUniform();
+	}
+	fclose(mainF);
+	fclose(annotF);
+}
+
+void MultithreadBlockCompOutStream::writeByte(int toW){
+	totalWrite++;
+	MultithreadBlockCompOutStreamUniform* curUni = getOpenUniform();
+	curUni->compMeth->theData.push_back(toW);
+	if(curUni->compMeth->theData.size() >= chunkSize){
+		curUni->threadID = compThreads->addTask(multithreadBlockCompOutCompress, curUni);
+		curUni->hasWait = 0;
+		compressingUnis.push_back(curUni);
+	}
+	else{
+		fillingTmp = curUni;
+	}
+}
+
+void MultithreadBlockCompOutStream::writeBytes(const char* toW, uintptr_t numW){
+	const char* leftW = toW;
+	uintptr_t leftN = numW;
+	//set up the fills
+	while(leftN){
+		MultithreadBlockCompOutStreamUniform* curUni = getOpenUniform();
+		uintptr_t numPosAdd = chunkSize - curUni->compMeth->theData.size();
+		if(numPosAdd > leftN){ numPosAdd = leftN; }
+		uintptr_t endSize = curUni->compMeth->theData.size() + numPosAdd;
+		curUni->insertFrom = leftW;
+		curUni->insertNum = numPosAdd;
+		curUni->threadID = compThreads->addTask(multithreadBlockCompOutFill, curUni);
+		curUni->hasWait = 0;
+		if(endSize == chunkSize){
+			fillingFull.push_back(curUni);
+		}
+		else{
+			//leftN will be zero, so this is fine
+			fillingTmp = curUni;
+		}
+		leftW += numPosAdd;
+		leftN -= numPosAdd;
+	}
+	//wait on the fills (pushing fulls to compression)
+	while(fillingFull.size()){
+		MultithreadBlockCompOutStreamUniform* curUni = fillingFull[0];
+		fillingFull.pop_front();
+		compThreads->joinTask(curUni->threadID);
+		curUni->threadID = compThreads->addTask(multithreadBlockCompOutCompress, curUni);
+		curUni->hasWait = 0;
+		compressingUnis.push_back(curUni);
+	}
+	if(fillingTmp){
+		compThreads->joinTask(fillingTmp->threadID);
+		fillingTmp->hasWait = 1;
+	}
+	//note the change
+	totalWrite += numW;
+}
+
+void MultithreadBlockCompOutStream::flush(){
+	if(fillingTmp){
+		fillingTmp->threadID = compThreads->addTask(multithreadBlockCompOutCompress, fillingTmp);
+		fillingTmp->hasWait = 0;
+		compressingUnis.push_back(fillingTmp);
+		fillingTmp = 0;
+	}
+}
+
+uintptr_t MultithreadBlockCompOutStream::tell(){
+	return totalWrite;
+}
+
+MultithreadBlockCompOutStreamUniform* MultithreadBlockCompOutStream::getOpenUniform(){
+	tailRecurTgt:
+	MultithreadBlockCompOutStreamUniform* curUni;
+	if(fillingTmp){
+		curUni = fillingTmp;
+		fillingTmp = 0;
+		return curUni;
+	}
+	if(waitingUnis.size()){
+		curUni = waitingUnis[waitingUnis.size()-1];
+		waitingUnis.pop_back();
+		return curUni;
+	}
+	if(compressingUnis.size()){
+		curUni = compressingUnis[0];
+		compressingUnis.pop_front();
+		compThreads->joinTask(curUni->threadID);
+		curUni->hasWait = 1;
+		//dump to file
+		//write the data
+		uintptr_t origLen = curUni->compMeth->theData.size();
+		uintptr_t compLen = curUni->compMeth->compData.size();
+		if(compLen){
+			if(fwrite(&(curUni->compMeth->compData[0]), 1, compLen, mainF) != compLen){
+				throw std::runtime_error("Problem writing compressed data.");
+			}
+		}
+		//write out an annotation
+		char annotBuff[BLOCKCOMP_ANNOT_ENTLEN];
+		nat2be64(preCompBS, annotBuff);
+		nat2be64(postCompBS, annotBuff+8);
+		nat2be64(origLen, annotBuff+16);
+		nat2be64(compLen, annotBuff+24);
+		if(fwrite(annotBuff, 1, BLOCKCOMP_ANNOT_ENTLEN, annotF) != BLOCKCOMP_ANNOT_ENTLEN){
+			throw std::runtime_error("Problem writing annotations.");
+		}
+		//and prepare for the next round
+		preCompBS += origLen;
+		postCompBS += compLen;
+		curUni->compMeth->theData.clear();
+		return curUni;
+	}
+	//everything is filling: wait on all and start compressing
+	while(fillingFull.size()){
+		curUni = fillingFull[0];
+		fillingFull.pop_front();
+		compThreads->joinTask(curUni->threadID);
+		curUni->threadID = compThreads->addTask(multithreadBlockCompOutCompress, curUni);
+		curUni->hasWait = 0;
+		compressingUnis.push_back(curUni);
+	}
+	goto tailRecurTgt;
+	return 0;
+}
+
+/**Multithread stuff for block decompression.*/
+class MultithreadBlockCompInStreamUniform{
+public:
+	/**Set up an empty uniform.*/
+	MultithreadBlockCompInStreamUniform();
+	/**Clean up any data.*/
+	~MultithreadBlockCompInStreamUniform();
+	/**The compression method.*/
+	CompressionMethod* compMeth;
+	/**The ID to wait on.*/
+	uintptr_t threadID;
+	
+	/**The place to put the prefix of the data.*/
+	char* dumpToA;
+	/**The amount of prefix data to dump.*/
+	uintptr_t numDumpA;
+	/**The place to put the suffix of the data.*/
+	char* dumpToB;
+	/**The amount of suffix data to dump.*/
+	uintptr_t numDumpB;
+	
+	/**The place to copy from: for memcpy jobs.*/
+	const char* copyFrom;
+};
+
+MultithreadBlockCompInStreamUniform::MultithreadBlockCompInStreamUniform(){
+	compMeth = 0;
+}
+
+MultithreadBlockCompInStreamUniform::~MultithreadBlockCompInStreamUniform(){
+	if(compMeth){ delete(compMeth); }
+}
+
+/**Actually perform decompression.*/
+void multithreadBlockCompInDecompress(void* myUni){
+	MultithreadBlockCompInStreamUniform* rUni = (MultithreadBlockCompInStreamUniform*)myUni;
+	rUni->compMeth->decompressData();
+	const char* curCpyF = &(rUni->compMeth->theData[0]);
+	memcpy(rUni->dumpToA, curCpyF, rUni->numDumpA);
+	memcpy(rUni->dumpToB, curCpyF + rUni->numDumpA, rUni->numDumpB);
+}
+
+/**Actually perform decompression.*/
+void multithreadBlockCompInFill(void* myUni){
+	MultithreadBlockCompInStreamUniform* rUni = (MultithreadBlockCompInStreamUniform*)myUni;
+	const char* curCpyF = rUni->copyFrom;
+	memcpy(rUni->dumpToA, curCpyF, rUni->numDumpA);
+	memcpy(rUni->dumpToB, curCpyF + rUni->numDumpA, rUni->numDumpB);
+}
+
+MultithreadBlockCompInStream::MultithreadBlockCompInStream(const char* mainFN, const char* annotFN, CompressionMethod* compMeth, int numThreads, ThreadPool* useThreads){
+	//open up the file proper
+	intptr_t numBlocksT = getFileSize(annotFN);
+	if(numBlocksT < 0){std::string errMess("Problem examining annotation file "); errMess.append(annotFN); throw std::runtime_error(errMess);}
+	numBlocks = numBlocksT / BLOCKCOMP_ANNOT_ENTLEN;
+	mainF = fopen(mainFN, "rb");
+	if(mainF == 0){
+		throw std::runtime_error("Problem opening main block file.");
+	}
+	annotF = fopen(annotFN, "rb");
+	if(annotF == 0){
+		fclose(mainF);
+		throw std::runtime_error("Problem opening annotation block file.");
+	}
+	//set up the initial reads
+	numReadBlocks = 0;
+	compThreads = useThreads;
+	threadUnis.resize(numThreads);
+	for(uintptr_t i = 0; i<threadUnis.size(); i++){
+		MultithreadBlockCompInStreamUniform* curUni = &(threadUnis[i]);
+		curUni->compMeth = compMeth->clone();
+	}
+	leftover = &leftoverA;
+	nextLeftover = 0;
+}
+
+MultithreadBlockCompInStream::~MultithreadBlockCompInStream(){
+	fclose(mainF);
+	fclose(annotF);
+}
+
+int MultithreadBlockCompInStream::readByte(){
+	if(nextLeftover < leftover->size()){
+		int toRet = (*leftover)[nextLeftover];
+		nextLeftover++;
+		return toRet;
+	}
+	char rBuff;
+	uintptr_t numRead = readBytes(&rBuff, 1);
+	if(numRead == 1){
+		return rBuff;
+	}
+	return -1;
+}
+
+uintptr_t MultithreadBlockCompInStream::readBytes(char* toR, uintptr_t numR){
+	//figure out the prelude/postlude storage (short circuit if enough left over)
+	std::vector<char>* prelude = leftover;
+	std::vector<char>* postlude = &leftoverA;
+	if(postlude == prelude){ postlude = &leftoverB; }
+	if(nextLeftover >= prelude->size()){ prelude = 0;}
+	else if((prelude->size() - nextLeftover) >= numR){
+		memcpy(toR, &((*leftover)[nextLeftover]), numR);
+		nextLeftover += numR;
+		return numR;
+	}
+	postlude->clear();
+	//start reading
+	char* nextR = toR;
+	uintptr_t leftR = numR;
+	uintptr_t nextOpenI = 0;
+	uintptr_t nextHotI = 0;
+	#define PREPARE_NEXT_JOB \
+		nextOpenI = (nextOpenI + 1) % threadUnis.size();\
+		if(nextOpenI == nextHotI){\
+			compThreads->joinTask(threadUnis[nextOpenI].threadID);\
+			nextHotI = (nextHotI + 1) % threadUnis.size();\
+		}
+	while(leftR){
+		MultithreadBlockCompInStreamUniform* cUni = &(threadUnis[nextOpenI]);
+		cUni->dumpToA = nextR;
+		if(prelude){
+			//setup a memcpy job
+			cUni->numDumpA = prelude->size() - nextLeftover;
+			cUni->copyFrom = &((*prelude)[nextLeftover]);
+			cUni->dumpToB = 0;
+			cUni->numDumpB = 0;
+			cUni->threadID = compThreads->addTask(multithreadBlockCompInFill, cUni);
+			leftR -= cUni->numDumpA;
+			nextR += cUni->numDumpA;
+			prelude = 0;
+			PREPARE_NEXT_JOB
+			continue;
+		}
+		//if no more blocks, stop
+		if(numReadBlocks == numBlocks){ break; }
+		//load in the annotation for the next block
+		char annotBuff[BLOCKCOMP_ANNOT_ENTLEN];
+		if(fread(annotBuff, 1, BLOCKCOMP_ANNOT_ENTLEN, annotF) != BLOCKCOMP_ANNOT_ENTLEN){
+			throw std::runtime_error("Problem reading annotations.");
+		}
+		uintptr_t numPre = be2nat64(annotBuff+16);
+		uintptr_t numPost = be2nat64(annotBuff+24);
+		numReadBlocks++;
+		if(numPost==0){ continue; }
+		cUni->compMeth->compData.resize(numPost);
+		if(fread(&(cUni->compMeth->compData[0]), 1, numPost, mainF) != numPost){throw std::runtime_error("Problem reading data.");}
+		//figure out how it splits
+		if(numPre > leftR){
+			postlude->resize(numPre - leftR);
+			cUni->numDumpA = leftR;
+			cUni->dumpToB = &((*postlude)[0]);
+			cUni->numDumpB = postlude->size();
+		}
+		else{
+			cUni->numDumpA = numPre;
+			cUni->dumpToB = 0;
+			cUni->numDumpB = 0;
+		}
+		cUni->threadID = compThreads->addTask(multithreadBlockCompInDecompress, cUni);
+		leftR -= cUni->numDumpA;
+		nextR += cUni->numDumpA;
+		PREPARE_NEXT_JOB
+	}
+	//run out any open clocks
+	while(nextHotI != nextOpenI){
+		compThreads->joinTask(threadUnis[nextHotI].threadID);
+		nextHotI = (nextHotI + 1) % threadUnis.size();
+	}
+	//and prepare for the next round
+	nextLeftover = 0;
+	leftover = postlude;
+	return (numR - leftR);
+}
+
 GZipOutStream::GZipOutStream(int append, const char* fileName){
 	myName = fileName;
 	if(append){
@@ -460,6 +861,13 @@ void RawCompressionMethod::compressData(){
 	compData = theData;
 }
 
+CompressionMethod* RawCompressionMethod::clone(){
+	RawCompressionMethod* toRet = new RawCompressionMethod();
+	toRet->theData = theData;
+	toRet->compData = compData;
+	return toRet;
+}
+
 GZipCompressionMethod::~GZipCompressionMethod(){}
 
 void GZipCompressionMethod::decompressData(){
@@ -496,5 +904,12 @@ void GZipCompressionMethod::compressData(){
 		bufEndSStore = curBuffLen;
 	}
 	compData.resize(bufEndSStore);
+}
+
+CompressionMethod* GZipCompressionMethod::clone(){
+	GZipCompressionMethod* toRet = new GZipCompressionMethod();
+	toRet->theData = theData;
+	toRet->compData = compData;
+	return toRet;
 }
 

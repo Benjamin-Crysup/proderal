@@ -41,6 +41,10 @@ void sequenceReverseCompliment(uintptr_t revLen, char* toRev, double* toRevQ){
 	}
 	char compArr[256];
 	for(uintptr_t i = 0; i<256; i++){ compArr[i] = i; }
+		compArr[0x00FF & 'A'] = 'T';
+		compArr[0x00FF & 'T'] = 'A';
+		compArr[0x00FF & 'C'] = 'G';
+		compArr[0x00FF & 'G'] = 'C';
 	for(uintptr_t i = 0; i<revLen; i++){
 		toRev[i] = compArr[0x00FF & toRev[i]];
 	}
@@ -262,7 +266,7 @@ GailAQSequenceReader::GailAQSequenceReader(BlockCompInStream* toFlit, const char
 GailAQSequenceReader::~GailAQSequenceReader(){
 	fclose(indF);
 }
-
+//TODO quality as double
 int GailAQSequenceReader::readNextEntry(){
 	bool wasSeek = false;
 	if(resetInd >= 0){
@@ -286,20 +290,21 @@ int GailAQSequenceReader::readNextEntry(){
 	if(wasSeek){
 		theStr->seek(nameLoc);
 	}
+	InStream* focStr = theStr;
 	nameStore.resize(seqLoc - nameLoc);
-		if(theStr->readBytes(&(nameStore[0]), nameStore.size()) != nameStore.size()){ throw std::runtime_error("Problem reading sequence name."); }
+		if(focStr->readBytes(&(nameStore[0]), nameStore.size()) != nameStore.size()){ throw std::runtime_error("Problem reading sequence name."); }
 		lastReadShortNameLen = shortNameLen;
 		if(shortNameLen > nameStore.size()){ throw std::runtime_error("Short name longer than full name."); }
 		lastReadNameLen = nameStore.size();
 		lastReadName = &(nameStore[0]);
 	seqStore.resize(qualLoc - seqLoc);
-		if(theStr->readBytes(&(seqStore[0]), seqStore.size()) != seqStore.size()){ throw std::runtime_error("Problem reading sequence."); }
+		if(focStr->readBytes(&(seqStore[0]), seqStore.size()) != seqStore.size()){ throw std::runtime_error("Problem reading sequence."); }
 		lastReadSeqLen = seqStore.size();
 		lastReadSeq = &(seqStore[0]);
 	lastReadHaveQual = haveQual;
 	if(haveQual){
 		tmpQualS.resize(qualLoc - seqLoc);
-		if(theStr->readBytes((char*)&(tmpQualS[0]), tmpQualS.size()) != tmpQualS.size()){ throw std::runtime_error("Problem reading quality."); }
+		if(focStr->readBytes((char*)&(tmpQualS[0]), tmpQualS.size()) != tmpQualS.size()){ throw std::runtime_error("Problem reading quality."); }
 		qualStore.resize(tmpQualS.size());
 		fastaPhredsToLog10Prob(tmpQualS.size(), &(tmpQualS[0]), &(qualStore[0]));
 		lastReadQual = &(qualStore[0]);
@@ -316,6 +321,7 @@ uintptr_t GailAQSequenceReader::getNumEntries(){
 }
 
 uintptr_t GailAQSequenceReader::getEntryLength(uintptr_t entInd){
+	if(!theStr){ throw std::runtime_error("If using a multithreaded gail reader, cannot random access."); }
 	if(entInd >= numEntries){ throw std::runtime_error("Bad entry index."); }
 	resetInd = focusInd;
 	if(fseekPointer(indF, GAIL_INDEX_ENTLEN*entInd, SEEK_SET)){ throw std::runtime_error("Problem seeking index file."); }
@@ -330,6 +336,7 @@ uintptr_t GailAQSequenceReader::getEntryLength(uintptr_t entInd){
 }
 
 void GailAQSequenceReader::getEntrySubsequence(uintptr_t entInd, uintptr_t fromBase, uintptr_t toBase){
+	if(!theStr){ throw std::runtime_error("If using a multithreaded gail reader, cannot random access."); }
 	if(entInd >= numEntries){ throw std::runtime_error("Bad entry index."); }
 	resetInd = focusInd;
 	if(fseekPointer(indF, GAIL_INDEX_ENTLEN*entInd, SEEK_SET)){ throw std::runtime_error("Problem seeking index file."); }
@@ -368,6 +375,75 @@ void GailAQSequenceReader::getEntrySubsequence(uintptr_t entInd, uintptr_t fromB
 	else{
 		qualStore.clear();
 	}
+}
+
+SequentialGailAQSequenceReader::SequentialGailAQSequenceReader(InStream* toFlit, const char* indFName, uintptr_t loadSize, uintptr_t useTCount, ThreadPool* useThreads){
+	intptr_t annotLen = getFileSize(indFName);
+	if(annotLen < 0){throw std::runtime_error("Problem examining index file.");}
+	if(annotLen % GAIL_INDEX_ENTLEN){throw std::runtime_error("Malformed index file.");}
+	numEntries = annotLen / GAIL_INDEX_ENTLEN;
+	indF = fopen(indFName, "rb");
+	if(indF == 0){ throw std::runtime_error("Could not open index file."); }
+	bufferSize = loadSize;
+	cacheSize = bufferSize;
+	cache = (char*)malloc(cacheSize);
+	theStr = toFlit;
+	handEntries = 0;
+	nextReport = 0;
+	//TODO
+}
+
+SequentialGailAQSequenceReader::~SequentialGailAQSequenceReader(){
+	fclose(indF);
+	free(cache);
+}
+
+int SequentialGailAQSequenceReader::readNextEntry(){
+	char loadBuff[GAIL_INDEX_ENTLEN];
+	if(5*nextReport >= cacheEntries.size()){
+		handEntries += nextReport;
+		nextReport = 0;
+		cacheEntries.clear();
+		if(handEntries >= numEntries){ return 0; }
+		//refill the buffer
+		uintptr_t loadSize = 0;
+		uintptr_t loadEnts = 0;
+		while(loadSize < bufferSize){
+			if((handEntries + loadEnts) == numEntries){ break; }
+			if(fread(loadBuff, 1, GAIL_INDEX_ENTLEN, indF)!=GAIL_INDEX_ENTLEN){ throw std::runtime_error("Problem reading index file."); }
+			uintptr_t nameLoc = be2nat64(loadBuff);
+			uintptr_t shortNameLen = be2nat64(loadBuff+8);
+			uintptr_t seqLoc = be2nat64(loadBuff+16);
+			uintptr_t qualLoc = be2nat64(loadBuff+24);
+			uintptr_t haveQual = be2nat64(loadBuff+32);
+			cacheEntries.push_back(nameLoc);
+			cacheEntries.push_back(shortNameLen);
+			cacheEntries.push_back(seqLoc);
+			cacheEntries.push_back(qualLoc);
+			cacheEntries.push_back(haveQual);
+			loadSize += ((seqLoc - nameLoc) + (qualLoc - seqLoc) + (haveQual ? (qualLoc - seqLoc) : 0));
+			loadEnts++;
+		}
+		if(loadSize > cacheSize){
+			free(cache);
+			cacheSize = loadSize;
+			cache = (char*)malloc(cacheSize);
+		}
+		if(theStr->readBytes(cache, loadSize) != loadSize){ throw std::runtime_error("Truncated gail sequence file."); }
+		//convert qualities
+		//TODO
+	}
+	uintptr_t baseI = 5*nextReport;
+	uintptr_t entOffset = cacheEntries[baseI] - cacheEntries[0];
+	lastReadShortNameLen = cacheEntries[baseI + 1];
+	lastReadNameLen = cacheEntries[baseI + 2] - cacheEntries[baseI];
+	lastReadName = cache + entOffset;
+	lastReadSeqLen = cacheEntries[baseI + 3] - cacheEntries[baseI + 2];
+	lastReadSeq = lastReadName + lastReadNameLen;
+	//TODO fix this
+	lastReadHaveQual = 0; //= cacheEntries[baseI + 4];
+	nextReport++;
+	return 1;
 }
 
 GailAQSequenceWriter::GailAQSequenceWriter(int append, BlockCompOutStream* toFlit, const char* indFName){

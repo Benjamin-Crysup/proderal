@@ -93,7 +93,7 @@ int TSVTabularReader::readNextEntry(){
 		}
 		hitEndOfLine:
 	//set up the pointers
-		const char* baseSPtr = entryFlat.c_str();
+		char* baseSPtr = &(entryFlat[0]);
 		for(uintptr_t i = 1; i<headTmp.size(); i++){
 			entryHeads.push_back(baseSPtr + headTmp[i-1]);
 		}
@@ -173,13 +173,16 @@ void TSVTabularWriter::writeNextEntry(){
 TabularData::TabularData(){}
 
 TabularData::TabularData(TabularReader* toLoad){
-	std::vector<std::string> curEntry;
+	std::vector< std::vector<char> > curEntry;
+	std::vector<char> curCell;
 	while(toLoad->readNextEntry() > 0){
 		curEntry.clear();
 		for(uintptr_t i = 0; i<toLoad->numEntries; i++){
 			uintptr_t curEntS = toLoad->entrySizes[i];
 			const char* curEntTmp = toLoad->curEntries[i];
-			curEntry.push_back(std::string(curEntTmp, curEntTmp+curEntS));
+			curCell.clear();
+			curCell.insert(curCell.end(), curEntTmp, curEntTmp + curEntS);
+			curEntry.push_back(curCell);
 		}
 		allEntries.push_back(curEntry);
 	}
@@ -189,15 +192,17 @@ TabularData::~TabularData(){}
 
 void TabularData::dumpData(TabularWriter* dumpTo){
 	std::vector<uintptr_t> lenStore;
-	std::vector<const char*> txtStore;
+	std::vector<char*> txtStore;
 	for(uintptr_t i = 0; i<allEntries.size(); i++){
 		lenStore.clear();
 		txtStore.clear();
-		std::vector<std::string>* curEntry = &(allEntries[i]);
+		std::vector< std::vector<char> >* curEntry = &(allEntries[i]);
 		for(uintptr_t j = 0; j<curEntry->size(); j++){
-			std::string* curTxt = &((*curEntry)[j]);
+			std::vector<char>* curTxt = &((*curEntry)[j]);
 			lenStore.push_back(curTxt->size());
-			txtStore.push_back(curTxt->c_str());
+			char* curLoc = 0;
+			if(curTxt->size()){ curLoc = &((*curTxt)[0]); }
+			txtStore.push_back(curLoc);
 		}
 		dumpTo->numEntries = curEntry->size();
 		dumpTo->entrySizes = &(lenStore[0]);

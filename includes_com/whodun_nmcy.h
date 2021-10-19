@@ -1,6 +1,9 @@
 #ifndef WHODUN_NMCY_H
 #define WHODUN_NMCY_H 1
 
+#include <utility>
+#include <stdint.h>
+
 /*Never measure, cut yourself.*/
 
 /**Like std::pair.*/
@@ -39,6 +42,17 @@ public:
 		return false;
 	}
 };
+
+/**A size/pointer combination used as a string.*/
+typedef std::pair<uintptr_t,char*> SizePtrString;
+
+/**
+ * A utility for maps: use maps without the allocation in std::string.
+ * @param strA The first "string": length and characters.
+ * @param strB The second "string": length and characters.
+ * @return Whether strA is less than strB.
+ */
+bool pointerStringMapCompare(SizePtrString strA, SizePtrString strB);
 
 
 #endif

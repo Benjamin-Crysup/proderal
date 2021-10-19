@@ -86,3 +86,48 @@ void* memsetmt(void* setP, int value, size_t numBts, unsigned numThread, ThreadP
 	}
 	return setP;
 }
+
+/**A uniform for a memset piece.*/
+typedef struct{
+	/**The place to copy to.*/
+	char* myTo;
+	/**The place to copy from.*/
+	char* myFrom;
+	/**The number of bytes.*/
+	size_t myNumB;
+	/**The ID of this task.*/
+	uintptr_t threadID;
+} MTMemswapUniform;
+
+/**
+ * The action for each subthread.
+ * @param myUni The uniform.
+ */
+void memswapmt_sub(void* myUni){
+	MTMemswapUniform* rUni = (MTMemswapUniform*)myUni;
+	memswap(rUni->myTo, rUni->myFrom, rUni->myNumB);
+}
+
+void memswapmt(char* arrA, char* arrB, size_t numBts, unsigned numThread, ThreadPool* mainPool){
+	std::vector<MTMemswapUniform> memcpyUnis;
+	memcpyUnis.resize(numThread);
+	size_t numPerT = numBts / numThread;
+	size_t numExtT = numBts % numThread;
+	size_t curOff = 0;
+	for(unsigned i = 0; i<numThread; i++){
+		char* curTo = arrA + curOff;
+		char* curFrom = arrB + curOff;
+		size_t curNum = numPerT + (i<numExtT);
+		MTMemswapUniform* curUniD = &(memcpyUnis[i]);
+			curUniD->myTo = curTo;
+			curUniD->myFrom = curFrom;
+			curUniD->myNumB = curNum;
+		curUniD->threadID = mainPool->addTask(memswapmt_sub, curUniD);
+		curOff += curNum;
+	}
+	for(uintptr_t i = 0; i<numThread; i++){
+		mainPool->joinTask(memcpyUnis[i].threadID);
+	}
+}
+
+

@@ -3,6 +3,7 @@
 
 #include <deque>
 
+#include "whodun_nmcy.h"
 #include "whodun_oshelp.h"
 #include "whodun_compress.h"
 
@@ -10,11 +11,11 @@
 class SortOptions{
 public:
 	/**
-	 * The method to use for comparison.
+	 * The method to use for comparison (i.e. less than).
 	 * @param unif A uniform for the comparison.
 	 * @param itemA The first item.
 	 * @param itemB The second item.
-	 * @return Whther itemA should come before itemB.
+	 * @return Whther itemA should come before itemB (false if equal).
 	 */
 	bool (*compMeth)(void* unif, void* itemA,void* itemB);
 	/**The size of each item.*/
@@ -46,6 +47,20 @@ void inMemoryMergesort(uintptr_t numEnts, char* inMem, SortOptions* opts);
  */
 void outOfMemoryMergesort(InStream* startF, const char* tempFolderName, OutStream* outF, SortOptions* opts);
 
+/**Bytes that have been "written" but not yet read from the pipe.*/
+typedef struct{
+	/**The size of the data in the buffer.*/
+	uintptr_t buffSize;
+	/**The next index to spit out.*/
+	uintptr_t nextI;
+	/**The size of the allocation.*/
+	uintptr_t buffAlloc;
+	/**The buffer itself.*/
+	char* buff;
+} PreSortMultithreadPipeBufferEntry;
+
+class PreSortMultithreadPipeTaskEntry;
+
 /**An pipe for collecting data from multiple threads that is intended to be sorted (i.e. input order doesn't REALLY matter).*/
 class PreSortMultithreadPipe : public InStream{
 public:
@@ -54,6 +69,14 @@ public:
 	 * @param numSave The maximum number of bytes to save in the buffer.
 	 */
 	PreSortMultithreadPipe(uintptr_t numSave);
+	/**
+	 * Set up the stream.
+	 * @param numSave The maximum number of bytes to save in the buffer.
+	 * @param bigPool The pool to use.
+	 */
+	PreSortMultithreadPipe(uintptr_t numSave, ThreadPool* bigPool);
+	/**Clean up.*/
+	~PreSortMultithreadPipe();
 	/**
 	 * Add a chunk of bytes.
 	 * @param toW The data to write.
@@ -70,16 +93,22 @@ public:
 	bool endWrite;
 	/**Maximum number of bytes to buffer.*/
 	uintptr_t maxBuff;
-	/**A place to temporarily store data.*/
-	std::deque<char> datBuff;
+	/**Queued data.*/
+	std::deque< PreSortMultithreadPipeBufferEntry > datBuff;
+	/**Allocated buffers.*/
+	std::deque< PreSortMultithreadPipeBufferEntry > allocBuff;
+	/**The amount of data waiting to fly.*/
+	uintptr_t totDat;
 	/**Used to synchronize writes: know that this will be held during waits.*/
-	OSMutex writeMut;
-	/**Used to synchronize reads.*/
-	OSMutex drainMut;
+	OSMutex datMut;
 	/**Used to wait for a clear buffer.*/
 	OSCondition drainCon;
 	/**Used to wait for a full buffer.*/
 	OSCondition fillCon;
+	/**The thread pool to use, if any.*/
+	ThreadPool* usePool;
+	/**The currently running tasks.*/
+	std::vector<PreSortMultithreadPipeTaskEntry> liveReadTasks;
 };
 
 /**

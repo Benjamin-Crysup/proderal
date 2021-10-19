@@ -22,6 +22,44 @@ BedFileReader::BedFileReader(TabularReader* readFrom){
 
 BedFileReader::~BedFileReader(){}
 
+std::pair<uintptr_t,uintptr_t> parseUCSCCoordinate(const char* ucsc, std::string* refStore, std::string* errStore){
+	std::pair<uintptr_t,uintptr_t> toRet(0,0);
+	const char* curUcsc = ucsc;
+	//find the reference name
+		const char* colChar = strchr(curUcsc, ':');
+		if(!colChar){
+			errStore->append("Malformed coordinate: no colon found.");
+			return toRet;
+		}
+		refStore->insert(refStore->end(), curUcsc, colChar);
+		curUcsc = colChar + 1;
+	//look for a -
+		const char* minChar = strchr(curUcsc, '-');
+		if(minChar){
+			//make sure only digits up to minus
+			if(strspn(curUcsc, "0123456789") != (uintptr_t)(minChar - curUcsc)){
+				errStore->append("Malformed coordinate: illegal character found.");
+				return toRet;
+			}
+			toRet.first = atol(curUcsc);
+			curUcsc = minChar + 1;
+		}
+	//get the last number
+		//only digits
+		if(strspn(curUcsc, "0123456789") != strlen(curUcsc)){
+			errStore->append("Malformed coordinate: illegal character found.");
+			return toRet;
+		}
+		if(minChar){
+			toRet.second = atol(curUcsc);
+		}
+		else{
+			toRet.first = atol(curUcsc);
+			toRet.second = toRet.first + 1;
+		}
+	return toRet;
+}
+
 CRBSAMFileContents::CRBSAMFileContents(){
 	lastReadHead = 0;
 	entryFlag = 0;
@@ -704,13 +742,10 @@ void openCRBSamFileRead(const char* fileName, InStream** saveIS, TabularReader**
 		return;
 	}
 	if(strendswith(fileName, ".sam.gz") || strendswith(fileName, ".sam.gzip")){
-		//TODO BGZip
-		/*
 		*saveIS = new GZipInStream(fileName);
 		*saveTS = new TSVTabularReader(0, *saveIS);
 		*saveSS = new SAMFileReader(*saveTS);
 		return;
-		*/
 	}
 	if(strendswith(fileName, ".bam")){
 		*saveIS = new GZipInStream(fileName);

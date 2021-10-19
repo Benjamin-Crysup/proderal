@@ -16,7 +16,7 @@ public:
 	/**The length of each entry.*/
 	uintptr_t* entrySizes;
 	/**The text of each entry.*/
-	const char** curEntries;
+	char** curEntries;
 	/**The number of read records.*/
 	uintptr_t recordCount;
 	/**Clear the above.*/
@@ -51,9 +51,9 @@ public:
 	/**The lengths of each entry.*/
 	std::vector<uintptr_t> entryLens;
 	/**The full text.*/
-	std::string entryFlat;
+	std::vector<char> entryFlat;
 	/**The pointers to the head of each entry.*/
-	std::vector<const char*> entryHeads;
+	std::vector<char*> entryHeads;
 	/**Head indices.*/
 	std::vector<uintptr_t> headTmp;
 	/**Storage for reads*/
@@ -105,7 +105,7 @@ public:
 	/**The full text.*/
 	std::vector<char> entryFlat;
 	/**The pointers to the head of each entry.*/
-	std::vector<const char*> entryHeads;
+	std::vector<char*> entryHeads;
 };
 
 /**Write a sequence of delimitted data.*/
@@ -116,7 +116,7 @@ public:
 	/**The length of each entry.*/
 	uintptr_t* entrySizes;
 	/**The text of each entry.*/
-	const char** curEntries;
+	char** curEntries;
 	/**Clear the above.*/
 	TabularWriter();
 	/**Allow subclassing.*/
@@ -187,7 +187,7 @@ public:
 	 */
 	void dumpData(TabularWriter* dumpTo);
 	/**The loaded entries.*/
-	std::vector< std::vector<std::string> > allEntries;
+	std::vector< std::vector< std::vector<char> > > allEntries;
 };
 
 #endif

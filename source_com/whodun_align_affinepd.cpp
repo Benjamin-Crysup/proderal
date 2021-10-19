@@ -1087,6 +1087,7 @@ void PositionDependentAffineGapLinearPairwiseAlignment::changeProblem(int numSeq
 
 void PositionDependentAffineGapLinearPairwiseAlignment::prepareAlignmentStructure(){
 	if(costTable){ return; }
+	//TODO sanely handle zero length sequence
 	//allocate the stupid thing
 		uintptr_t numTabEnts = (seqAs->size()+1)*(seqBs->size()+1);
 		uintptr_t numLineEnts = (seqBs->size()+1);
@@ -1122,6 +1123,7 @@ void PositionDependentAffineGapLinearPairwiseAlignment::prepareAlignmentStructur
 		intptr_t lenB = seqBs->size();
 		const char* seqA = seqAs->c_str();
 		const char* seqB = seqBs->c_str();
+		//NOTE: requires two's complement
 		intptr_t worstScore = -1; worstScore = worstScore << (8*sizeof(intptr_t)-1);
 		intptr_t negToZero = (numEnds == 0)-1;
 		intptr_t startIJ;

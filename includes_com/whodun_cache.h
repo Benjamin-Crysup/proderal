@@ -1,7 +1,32 @@
 #ifndef WHODUN_CACHE_H
 #define WHODUN_CACHE_H 1
 
+#include <set>
 #include <vector>
+#include <stdint.h>
+
+/**Keep track of unique IDs.*/
+class UniqueIDSet{
+public:
+	/**The next ID to return.*/
+	uintptr_t seekID;
+	/**The IDs in use.*/
+	std::set<uintptr_t> liveIDs;
+	/**Setup.*/
+	UniqueIDSet();
+	/**Teardown.*/
+	~UniqueIDSet();
+	/**
+	 * Retire an ID.
+	 * @param toKill The id to kill.
+	 */
+	void retireID(uintptr_t toKill);
+	/**
+	 * Get a new ID.
+	 * @return The ID.
+	 */
+	uintptr_t reserveID();
+};
 
 /**Allocate containers in a reusable manner: can cut down on allocation.*/
 template <typename OfT>

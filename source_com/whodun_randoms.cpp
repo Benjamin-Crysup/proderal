@@ -61,11 +61,9 @@ MersenneTwisterGenerator::MersenneTwisterGenerator(){
 	numPG = 0;
 	nextEnt = MERSENNE_TWIST_N;
 	haveSeed = false;
-	//TODO
 }
 
 MersenneTwisterGenerator::~MersenneTwisterGenerator(){
-	//TODO
 }
 
 int MersenneTwisterGenerator::seedSize(){

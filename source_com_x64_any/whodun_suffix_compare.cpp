@@ -10,14 +10,14 @@ bool SingleStringSuffixRankSortOption_compMeth(void* unif, void* itemA, void* it
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 		"jne endCSOTest%=\n"
 		"movq 16(%%rcx), %%r8\n"
 		"movq 16(%%rdx), %%r9\n"
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 		"endCSOTest%=:\n"
 	: "=a" (toRet)
 	: "c" (itemA), "d" (itemB)
@@ -36,7 +36,7 @@ bool SingleStringSuffixIndexSortOption_compMeth(void* unif, void* itemA, void* i
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 	: "=a" (toRet)
 	: "c" (itemA), "d" (itemB)
 	: "r8", "r9", "cc"
@@ -54,7 +54,7 @@ bool SingleStringSuffixRLPairSortOption_compMeth(void* unif, void* itemA, void* 
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 	: "=a" (toRet)
 	: "c" (itemA), "d" (itemB)
 	: "r8", "r9", "cc"
@@ -72,14 +72,14 @@ bool MultiStringSuffixRankSortOption_compMeth(void* unif, void* itemA, void* ite
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 		"jne endCSOTest%=\n"
 		"movq 24(%%rcx), %%r8\n"
 		"movq 24(%%rdx), %%r9\n"
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 		"endCSOTest%=:\n"
 	: "=a" (toRet)
 	: "c" (itemA), "d" (itemB)
@@ -98,14 +98,14 @@ bool MultiStringSuffixIndexSortOption_compMeth(void* unif, void* itemA, void* it
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 		"jne endCSOTest%=\n"
 		"movq 8(%%rcx), %%r8\n"
 		"movq 8(%%rdx), %%r9\n"
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 		"endCSOTest%=:\n"
 	: "=a" (toRet)
 	: "c" (itemA), "d" (itemB)
@@ -124,7 +124,7 @@ bool MultiStringSuffixRLPairSortOption_compMeth(void* unif, void* itemA, void* i
 		"bswapq %%r8\n"
 		"bswapq %%r9\n"
 		"subq %%r8, %%r9\n"
-		"setge %%al\n"
+		"setg %%al\n"
 	: "=a" (toRet)
 	: "c" (itemA), "d" (itemB)
 	: "r8", "r9", "cc"

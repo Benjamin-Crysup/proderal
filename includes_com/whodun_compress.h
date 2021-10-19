@@ -20,6 +20,11 @@ public:
 	virtual void decompressData() = 0;
 	/**Compress the data in theData into compData.*/
 	virtual void compressData() = 0;
+	/**
+	 * Create a copy of the method.
+	 * @return A copy: will need to delete.
+	 */
+	virtual CompressionMethod* clone() = 0;
 	/**The data to compress and/or the decompressed data.*/
 	std::vector<char> theData;
 	/**The compressed data and/or data to decompress.*/
@@ -110,7 +115,99 @@ public:
 	CompressionMethod* myComp;
 };
 
-//TODO multithreaded block compression (input and output)
+class MultithreadBlockCompOutStreamUniform;
+
+/**Block compress output.*/
+class MultithreadBlockCompOutStream : public OutStream{
+public:
+	/**
+	 * Open up the file to dump to.
+	 * @param append Whether to append to a file if it is already there.
+	 * @param blockSize The size of the compressed blocks.
+	 * @param mainFN The name of the data file.
+	 * @param annotFN The name of the annotation file.
+	 * @param compMeth The compression method to use for the blocks.
+	 * @param numThreads The number of threads to spawn.
+	 * @param useThreads The threads to use.
+	 */
+	MultithreadBlockCompOutStream(int append, uintptr_t blockSize, const char* mainFN, const char* annotFN, CompressionMethod* compMeth, int numThreads, ThreadPool* useThreads);
+	/**Clean up and close.*/
+	~MultithreadBlockCompOutStream();
+	void writeByte(int toW);
+	void writeBytes(const char* toW, uintptr_t numW);
+	void flush();
+	/**Get the number of (uncompressed) bytes already written.*/
+	uintptr_t tell();
+	/**The number of bytes to accumulate before dumping a block.*/
+	uintptr_t chunkSize;
+	/**The total number of uncompressed bytes written to the start of the current block.*/
+	uintptr_t preCompBS;
+	/**The total number of compressed bytes written to the start of the current block.*/
+	uintptr_t postCompBS;
+	/**The running total of bytes written: preCompBS can get out of sync with this.*/
+	uintptr_t totalWrite;
+	/**The data file.*/
+	FILE* mainF;
+	/**The annotation file. Quads of pre-comp address, post-comp address, pre-comp len, post-comp len.*/
+	FILE* annotF;
+	/**The threads to use for compression.*/
+	ThreadPool* compThreads;
+	/**Automatic storage for uniforms.*/
+	std::vector<MultithreadBlockCompOutStreamUniform> threadUnis;
+	/**The uniform currently being filled.*/
+	MultithreadBlockCompOutStreamUniform* fillingTmp;
+	/**The filling tasks (that, once finished, will go straight to compression).*/
+	std::deque<MultithreadBlockCompOutStreamUniform*> fillingFull;
+	/**Uniforms actively compressing.*/
+	std::deque<MultithreadBlockCompOutStreamUniform*> compressingUnis;
+	/**Uniforms waiting for use.*/
+	std::vector<MultithreadBlockCompOutStreamUniform*> waitingUnis;
+	/**
+	 * Get the next uniform to fill.
+	 * @return The next useful uniform.
+	 */
+	MultithreadBlockCompOutStreamUniform* getOpenUniform();
+};
+
+class MultithreadBlockCompInStreamUniform;
+
+/**Read a block compressed input stream: does NOT allow random access.*/
+class MultithreadBlockCompInStream : public InStream{
+public:
+	/**
+	 * Open up a blcok compressed file.
+	 * @param mainFN The name of the data file.
+	 * @param annotFN The name of the annotation file.
+	 * @param compMeth The compression method to use for the blocks.
+	 * @param numThreads The number of threads to spawn.
+	 * @param useThreads The threads to use.
+	 */
+	MultithreadBlockCompInStream(const char* mainFN, const char* annotFN, CompressionMethod* compMeth, int numThreads, ThreadPool* useThreads);
+	/**Clean up and close.*/
+	~MultithreadBlockCompInStream();
+	int readByte();
+	uintptr_t readBytes(char* toR, uintptr_t numR);
+	/**The number of blocks in the file.*/
+	uintptr_t numBlocks;
+	/**The data file.*/
+	FILE* mainF;
+	/**The annotation file. Quads of pre-comp address, post-comp address, pre-comp len, post-comp len.*/
+	FILE* annotF;
+	/**The number of read blocks.*/
+	uintptr_t numReadBlocks;
+	/**The threads to use for compression.*/
+	ThreadPool* compThreads;
+	/**A place to store stuff for each action.*/
+	std::vector<MultithreadBlockCompInStreamUniform> threadUnis;
+	/**Leftover bytes from the last read.*/
+	std::vector<char>* leftover;
+	/**The next leftover byte to report.*/
+	uintptr_t nextLeftover;
+	/**A vector for leftovers.*/
+	std::vector<char> leftoverA;
+	/**A vector for leftovers.*/
+	std::vector<char> leftoverB;
+};
 
 /**Out to gzip file.*/
 class GZipOutStream : public OutStream{
@@ -202,6 +299,7 @@ public:
 	~RawCompressionMethod();
 	void decompressData();
 	void compressData();
+	CompressionMethod* clone();
 };
 
 /**Compress using gzip.*/
@@ -211,6 +309,7 @@ public:
 	~GZipCompressionMethod();
 	void decompressData();
 	void compressData();
+	CompressionMethod* clone();
 };
 
 #endif

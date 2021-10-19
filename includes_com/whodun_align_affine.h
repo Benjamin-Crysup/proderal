@@ -27,6 +27,12 @@ public:
 	 * @return The character after the last byte this used.
 	 */
 	const char* parseSpecification(const char* parseS, const char* parseE);
+	/**
+	 * Set up a match cost matrix using a simple identity approach.
+	 * @param matchCost The score of a match.
+	 * @param mismatchCost The score of a mismatch.
+	 */
+	void identitySpecification(int matchCost, int mismatchCost);
 	/**The costs of each interaction pair.*/
 	int** allMMCost;
 	/**The number of character entries in the cost table.*/

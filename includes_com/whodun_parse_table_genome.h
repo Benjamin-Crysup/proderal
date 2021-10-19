@@ -21,6 +21,15 @@ public:
 	std::vector<uintptr_t> locEnds;
 };
 
+/**
+ * Utility to parse a UCSC coordinate.
+ * @param ucsc The coordinate string to parse.
+ * @param refStore The place to put the reference.
+ * @param errStore The place to put an error message.
+ * @return The start and end coordinates.
+ */
+std::pair<uintptr_t,uintptr_t> parseUCSCCoordinate(const char* ucsc, std::string* refStore, std::string* errStore);
+
 #define SAM_FLAG_MULTSEG 1
 #define SAM_FLAG_ALLALN 2
 #define SAM_FLAG_SEGUNMAP 4
@@ -169,9 +178,9 @@ public:
 	/**Temporary text storage.*/
 	std::vector<uintptr_t> tmpFlatE;
 	/**Temporary token storage.*/
-	std::vector<const char*> tmpS;
+	std::vector<char*> tmpS;
 	/**Temporary token storage.*/
-	std::vector<const char*> tmpE;
+	std::vector<char*> tmpE;
 	/**Temporary token storage.*/
 	std::vector<uintptr_t> tmpL;
 };

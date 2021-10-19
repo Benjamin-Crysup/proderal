@@ -28,7 +28,15 @@ void* memcpymt(void* cpyTo, const void* cpyFrom, size_t numBts, unsigned numThre
  */
 void* memsetmt(void* setP, int value, size_t numBts, unsigned numThread, ThreadPool* mainPool);
 
-//TODO multithreaded memcmp memcspn memspn memchr memmem memswap
+/**
+ * A multithreaded memswap.
+ * @param arrA THe first array.
+ * @param arrB The second array.
+ * @param numBts The number of bytes to swap.
+ * @param numThread The number of threads to use.
+ * @param mainPool The thread pool to use.
+ */
+void memswapmt(char* arrA, char* arrB, size_t numBts, unsigned numThread, ThreadPool* mainPool);
 
 /**
  * Determine if one string ends with another.
