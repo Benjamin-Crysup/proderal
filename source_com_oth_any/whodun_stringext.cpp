@@ -38,7 +38,7 @@ char* memmem(const char* str1, size_t numB1, const char* str2, size_t numB2){
 	size_t maxCheck = (numB1 - numB2) + 1;
 	for(size_t curCS = 0; curCS < maxCheck; curCS++){
 		if(memcmp(str1+curCS, str2, numB2) == 0){
-			return str1+curCS;
+			return (char*)(str1+curCS);
 		}
 	}
 	return 0;
@@ -133,8 +133,8 @@ uint_least32_t le2nat32(const char* toDebuffer){
 }
 
 void nat2be16(uint_least16_t toPrep, char* toBuffer){
-	toDebuffer[0] = (toPrep>>8);
-	toDebuffer[1] = toPrep;
+	toBuffer[0] = (toPrep>>8);
+	toBuffer[1] = toPrep;
 }
 
 uint_least16_t be2nat16(const char* toDebuffer){
@@ -142,8 +142,8 @@ uint_least16_t be2nat16(const char* toDebuffer){
 }
 
 void nat2le16(uint_least16_t toPrep, char* toBuffer){
-	toDebuffer[0] = toPrep;
-	toDebuffer[1] = (toPrep >> 8);
+	toBuffer[0] = toPrep;
+	toBuffer[1] = (toPrep >> 8);
 }
 
 uint_least16_t le2nat16(const char* toDebuffer){
