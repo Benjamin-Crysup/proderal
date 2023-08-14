@@ -27,6 +27,7 @@ size_t memspn(const char* str1, size_t numB1, const char* str2, size_t numB2){
 		}
 		return curCS;
 		wasGut:
+		;
 	}
 	return numB1;
 }
