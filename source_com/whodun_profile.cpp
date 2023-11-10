@@ -1,6 +1,7 @@
 #include "whodun_profile.h"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include "whodun_stringext.h"
 

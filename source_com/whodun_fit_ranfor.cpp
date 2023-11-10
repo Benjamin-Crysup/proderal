@@ -1,6 +1,7 @@
 #include "whodun_fit_ranfor.h"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include "whodun_stringext.h"
 

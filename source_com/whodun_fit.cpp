@@ -1,5 +1,7 @@
 #include "whodun_fit.h"
 
+#include <stdexcept>
+
 #include "whodun_stringext.h"
 
 DatapointDescription::DatapointDescription(){}
